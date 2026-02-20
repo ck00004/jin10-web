@@ -2,6 +2,7 @@
 name: jin10-monitor
 description: "金十数据红色新闻监控，推送重要财经新闻并提供 AI 分析。监控美国/中国股市、黄金、原油、加密货币等品种的重要资讯。"
 metadata: {"version":"1.0.0","clawdbot":{"emoji":"📊","os":["darwin","linux"],"channels":["telegram","discord","whatsapp"]}}
+repository: "https://github.com/winglight9/jin10-monitor"
 ---
 
 # Jin10 Monitor Skill
