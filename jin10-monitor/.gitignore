@@ -1,0 +1,13 @@
+# secrets
+config.json
+
+# runtime state
+.lock
+state.json
+dedup.json
+
+# logs
+*.log
+stdout.log
+stderr.log
+errors.log
