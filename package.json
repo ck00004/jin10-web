@@ -6,7 +6,6 @@
   "type": "module",
   "scripts": {
     "start": "node monitor.mjs",
-    "postinstall": "npx playwright install chromium",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -16,6 +15,6 @@
     "@anthropic-ai/sdk": "^0.39.0",
     "@google/generative-ai": "^0.24.0",
     "openai": "^4.85.0",
-    "playwright": "^1.58.2"
+    "ws": "^8.18.0"
   }
 }

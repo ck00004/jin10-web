@@ -339,6 +339,107 @@
       vertical-align: middle;
     }
 
+    /* ── Important (red) news card ─────────────────────────── */
+    .card.important {
+      border-left: 3px solid var(--bear);
+    }
+    .important-badge {
+      display: inline-block;
+      font-size: 0.65rem;
+      font-weight: 700;
+      padding: 1px 6px;
+      border-radius: 3px;
+      background: rgba(239,68,68,0.18);
+      color: var(--bear);
+      margin-left: 6px;
+      vertical-align: middle;
+    }
+    .flash-id {
+      font-size: 0.65rem;
+      color: var(--text-muted);
+      opacity: 0.6;
+      margin-left: 6px;
+    }
+    .deleted-badge {
+      display: inline-block;
+      font-size: 0.65rem;
+      font-weight: 600;
+      padding: 1px 6px;
+      border-radius: 3px;
+      background: rgba(148,163,184,0.15);
+      color: var(--neutral);
+      margin-left: 6px;
+      vertical-align: middle;
+      text-decoration: line-through;
+    }
+    .card.deleted-card {
+      opacity: 0.4;
+      border-left: 3px solid var(--neutral);
+    }
+
+    /* ── Edit history block ────────────────────────────────── */
+    .edit-history-block {
+      margin-top: 10px;
+      background: var(--surface2);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .edit-history-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 12px;
+      cursor: pointer;
+      user-select: none;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.73rem;
+      color: var(--text-muted);
+    }
+    .edit-history-header:hover { background: rgba(255,255,255,0.03); }
+    .edit-history-header span:first-child { flex: 1; }
+    .edit-history-toggle {
+      font-size: 0.6rem;
+      transition: transform 0.2s;
+    }
+    .edit-history-toggle.open { transform: rotate(180deg); }
+    .edit-history-body {
+      padding: 8px 12px;
+      font-size: 0.73rem;
+      line-height: 1.6;
+      color: var(--text);
+    }
+    .edit-history-body.collapsed { display: none; }
+    .edit-history-entry {
+      padding: 6px 0;
+      border-bottom: 1px solid rgba(46,51,71,0.5);
+    }
+    .edit-history-entry:last-child { border-bottom: none; }
+    .edit-history-time {
+      font-size: 0.68rem;
+      color: var(--text-muted);
+      margin-bottom: 3px;
+    }
+    .edit-history-diff {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 2px 8px;
+    }
+    .diff-label {
+      font-size: 0.68rem;
+      color: var(--text-muted);
+      white-space: nowrap;
+    }
+    .diff-old {
+      color: #f87171;
+      text-decoration: line-through;
+      opacity: 0.7;
+      overflow-wrap: break-word;
+    }
+    .diff-new {
+      color: #4ade80;
+      overflow-wrap: break-word;
+    }
+
     /* ── Toggle switch ─────────────────────────────────────── */
     .toggle-wrap {
       display: flex;
@@ -549,16 +650,32 @@
 
     function buildCard(item) {
       const card = document.createElement('div');
-      card.className = item.skipped ? 'card skipped' : 'card';
+      const isImportant = item.important === true;
+      const isDeleted = item.deleted === true;
+      let cls = 'card';
+      if (item.skipped) cls += ' skipped';
+      else if (isDeleted) cls += ' deleted-card';
+      else if (isImportant) cls += ' important';
+      card.className = cls;
       card.dataset.id = item.id;
 
-      // Time
+      // Time + badges
       const timeEl = document.createElement('div');
       timeEl.className = 'card-time';
-      timeEl.textContent = item.time || fmtTime(new Date(item.createdAt));
-      if (item.skipped) {
-        timeEl.innerHTML += `<span class="skip-badge">${esc(item.skipReason || '已跳过')}</span>`;
+      let timeHtml = esc(item.time || fmtTime(new Date(item.createdAt)));
+      if (isImportant) {
+        timeHtml += `<span class="important-badge">重要</span>`;
       }
+      if (isDeleted) {
+        timeHtml += `<span class="deleted-badge">已删除</span>`;
+      }
+      if (item.skipped) {
+        timeHtml += `<span class="skip-badge">${esc(item.skipReason || '已跳过')}</span>`;
+      }
+      if (item.flashId) {
+        timeHtml += `<span class="flash-id">ID: ${esc(item.flashId)}</span>`;
+      }
+      timeEl.innerHTML = timeHtml;
       card.appendChild(timeEl);
 
       // Title (optional)
@@ -575,10 +692,15 @@
       contentEl.textContent = item.content;
       card.appendChild(contentEl);
 
-      // Skipped news: no AI block or actions
-      if (item.skipped) return card;
+      // Edit history
+      if (Array.isArray(item.editHistory) && item.editHistory.length > 0) {
+        card.appendChild(buildEditHistoryBlock(item.editHistory));
+      }
 
-      // AI analysis block
+      // Skipped / deleted / non-important news: no AI block or actions
+      if (item.skipped || isDeleted || !isImportant) return card;
+
+      // AI analysis block (only for important news)
       if (item.analysis) {
         card.appendChild(buildAiBlock(item.analysis, item.analysisSource, item.technical));
       } else if (item.analysisError) {
@@ -588,7 +710,7 @@
         card.appendChild(noAi);
       }
 
-      // Card actions
+      // Card actions (only for important news)
       const actions = document.createElement('div');
       actions.className = 'card-actions';
       const reanalyzeBtn = document.createElement('button');
@@ -599,6 +721,49 @@
       card.appendChild(actions);
 
       return card;
+    }
+
+    function buildEditHistoryBlock(editHistory) {
+      const block = document.createElement('div');
+      block.className = 'edit-history-block';
+
+      const header = document.createElement('div');
+      header.className = 'edit-history-header';
+      header.innerHTML = `<span>📝 修改记录 (${editHistory.length}次)</span><span class="edit-history-toggle">▼</span>`;
+
+      const body = document.createElement('div');
+      body.className = 'edit-history-body collapsed';
+
+      for (const entry of editHistory) {
+        const entryEl = document.createElement('div');
+        entryEl.className = 'edit-history-entry';
+
+        const timeEl = document.createElement('div');
+        timeEl.className = 'edit-history-time';
+        timeEl.textContent = new Date(entry.at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
+        entryEl.appendChild(timeEl);
+
+        const diffEl = document.createElement('div');
+        diffEl.className = 'edit-history-diff';
+        if (entry.oldContent) {
+          diffEl.innerHTML += `<span class="diff-label">旧：</span><span class="diff-old">${esc(entry.oldContent.substring(0, 200))}</span>`;
+        }
+        if (entry.newContent) {
+          diffEl.innerHTML += `<span class="diff-label">新：</span><span class="diff-new">${esc(entry.newContent.substring(0, 200))}</span>`;
+        }
+        entryEl.appendChild(diffEl);
+        body.appendChild(entryEl);
+      }
+
+      block.appendChild(header);
+      block.appendChild(body);
+
+      header.addEventListener('click', () => {
+        const collapsed = body.classList.toggle('collapsed');
+        header.querySelector('.edit-history-toggle').classList.toggle('open', !collapsed);
+      });
+
+      return block;
     }
 
     function buildAiBlock(analysisText, source, technical) {
