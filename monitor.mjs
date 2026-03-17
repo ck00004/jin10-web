@@ -9,6 +9,9 @@ import { join, dirname, extname, resolve, sep } from 'path';
 import { fileURLToPath } from 'url';
 import { createServer } from 'http';
 import { chromium } from 'playwright';
+import OpenAI from 'openai';
+import Anthropic from '@anthropic-ai/sdk';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const LOCK_FILE = join(__dirname, '.lock');
@@ -344,100 +347,70 @@ async function buildTechnicalSummary(analysisText) {
   return lines.join('\n');
 }
 
-// 各 AI 提供商调用函数
-
-// 构建 API 端点：优先使用 baseUrl，否则使用默认地址
-function buildEndpoint(baseUrl, defaultBase, path) {
-  const base = baseUrl ? baseUrl.replace(/\/+$/, '') : defaultBase;
-  return `${base}${path}`;
-}
+// 各 AI 提供商调用函数（使用官方 SDK）
 
 async function callMinimax(apiKey, model, prompt, timeoutMs, baseUrl) {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-  const endpoint = buildEndpoint(baseUrl, 'https://api.minimaxi.com/anthropic/v1', '/messages');
-  try {
-    const r = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model: model || 'MiniMax-M2.5', max_tokens: 1024, messages: [{ role: 'user', content: prompt }] }),
-      signal: ctrl.signal,
-    });
-    const d = await r.json();
-    if (d.content && Array.isArray(d.content)) {
-      const blk = d.content.find(b => b.type === 'text' && b.text);
-      if (blk) return { text: blk.text.trim(), source: `MiniMax/${model || 'MiniMax-M2.5'}` };
-    }
-    throw new Error(d.error?.message || 'empty response');
-  } finally {
-    clearTimeout(timer);
-  }
+  // MiniMax 使用 Anthropic 兼容协议，通过 @anthropic-ai/sdk 调用
+  const usedModel = model || 'MiniMax-M2.5';
+  const client = new Anthropic({
+    apiKey,
+    baseURL: baseUrl ? baseUrl.replace(/\/+$/, '') : 'https://api.minimaxi.com/anthropic/v1',
+  });
+  const msg = await client.messages.create({
+    model: usedModel,
+    max_tokens: 1024,
+    messages: [{ role: 'user', content: prompt }],
+  }, { timeout: timeoutMs });
+  const blk = msg.content?.find(b => b.type === 'text' && b.text);
+  if (blk) return { text: blk.text.trim(), source: `MiniMax/${usedModel}` };
+  throw new Error('empty response');
 }
 
 async function callOpenai(apiKey, model, prompt, timeoutMs, baseUrl) {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-  const endpoint = buildEndpoint(baseUrl, 'https://api.openai.com/v1', '/chat/completions');
-  try {
-    const r = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-      body: JSON.stringify({ model: model || 'gpt-4o', max_tokens: 1024, messages: [{ role: 'user', content: prompt }] }),
-      signal: ctrl.signal,
-    });
-    const d = await r.json();
-    const txt = d.choices?.[0]?.message?.content?.trim();
-    if (txt) return { text: txt, source: `OpenAI/${model || 'gpt-4o'}` };
-    throw new Error(d.error?.message || 'empty response');
-  } finally {
-    clearTimeout(timer);
-  }
+  const usedModel = model || 'gpt-4o';
+  const client = new OpenAI({
+    apiKey,
+    ...(baseUrl ? { baseURL: baseUrl.replace(/\/+$/, '') } : {}),
+  });
+  const res = await client.chat.completions.create({
+    model: usedModel,
+    max_tokens: 1024,
+    messages: [{ role: 'user', content: prompt }],
+  }, { timeout: timeoutMs });
+  const txt = res.choices?.[0]?.message?.content?.trim();
+  if (txt) return { text: txt, source: `OpenAI/${usedModel}` };
+  throw new Error('empty response');
 }
 
 async function callGemini(apiKey, model, prompt, timeoutMs, baseUrl) {
-  const m = model || 'gemini-1.5-pro';
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-  const base = buildEndpoint(baseUrl, 'https://generativelanguage.googleapis.com/v1beta', '');
-  try {
-    const r = await fetch(
-      `${base}/models/${encodeURIComponent(m)}:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
-        signal: ctrl.signal,
-      }
-    );
-    const d = await r.json();
-    const txt = d.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-    if (txt) return { text: txt, source: `Gemini/${m}` };
-    throw new Error(d.error?.message || 'empty response');
-  } finally {
-    clearTimeout(timer);
-  }
+  const m = model || 'gemini-2.0-flash';
+  const clientOpts = { apiKey };
+  if (baseUrl) clientOpts.baseUrl = baseUrl.replace(/\/+$/, '');
+  const genAI = new GoogleGenerativeAI(apiKey);
+  const genModel = genAI.getGenerativeModel({ model: m }, clientOpts.baseUrl ? { baseUrl: clientOpts.baseUrl } : undefined);
+  const result = await genModel.generateContent({
+    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+    generationConfig: { maxOutputTokens: 1024 },
+  }, { timeout: timeoutMs });
+  const txt = result.response?.text()?.trim();
+  if (txt) return { text: txt, source: `Gemini/${m}` };
+  throw new Error('empty response');
 }
 
 async function callClaude(apiKey, model, prompt, timeoutMs, baseUrl) {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-  const endpoint = buildEndpoint(baseUrl, 'https://api.anthropic.com/v1', '/messages');
-  try {
-    const r = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model: model || 'claude-3-5-sonnet-20241022', max_tokens: 1024, messages: [{ role: 'user', content: prompt }] }),
-      signal: ctrl.signal,
-    });
-    const d = await r.json();
-    if (d.content && Array.isArray(d.content)) {
-      const blk = d.content.find(b => b.type === 'text' && b.text);
-      if (blk) return { text: blk.text.trim(), source: `Claude/${model || 'claude-3-5-sonnet-20241022'}` };
-    }
-    throw new Error(d.error?.message || 'empty response');
-  } finally {
-    clearTimeout(timer);
-  }
+  const usedModel = model || 'claude-sonnet-4-20250514';
+  const client = new Anthropic({
+    apiKey,
+    ...(baseUrl ? { baseURL: baseUrl.replace(/\/+$/, '') } : {}),
+  });
+  const msg = await client.messages.create({
+    model: usedModel,
+    max_tokens: 1024,
+    messages: [{ role: 'user', content: prompt }],
+  }, { timeout: timeoutMs });
+  const blk = msg.content?.find(b => b.type === 'text' && b.text);
+  if (blk) return { text: blk.text.trim(), source: `Claude/${usedModel}` };
+  throw new Error('empty response');
 }
 
 async function callProvider(provider, prompt, timeoutMs) {
@@ -701,11 +674,13 @@ function startWebServer() {
       if (pathname === '/api/news') {
         const limit  = Math.min(parseInt(url.searchParams.get('limit')  || '20', 10), 100);
         const before = parseInt(url.searchParams.get('before') || '0', 10);
-        const items  = loadNews();
-        const pool   = before > 0 ? items.filter(n => n.createdAt < before) : items;
+        const includeSkipped = url.searchParams.get('includeSkipped') === '1';
+        const allItems = loadNews();
+        const filtered = includeSkipped ? allItems : allItems.filter(n => !n.skipped);
+        const pool   = before > 0 ? filtered.filter(n => n.createdAt < before) : filtered;
         const page   = pool.slice(0, limit);
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ok: true, items: page, total: items.length, hasMore: pool.length > limit }));
+        res.end(JSON.stringify({ ok: true, items: page, total: filtered.length, hasMore: pool.length > limit }));
         return;
       }
 
@@ -901,6 +876,8 @@ async function main() {
           log(`  🚫 广告过滤: ${item.title?.substring(0,30)}`);
           dedup[k] = { ts: Date.now(), ad: true };
           saveDedup(dedup);
+          appendNews({ id: k, time: item.time, title: item.title, content: item.content,
+            skipped: true, skipReason: '广告', createdAt: Date.now() });
           continue;
         }
 
@@ -909,6 +886,8 @@ async function main() {
           log(`  🚫 点击查看过滤: ${item.time} ${item.title?.substring(0,30)}`);
           dedup[k] = { ts: Date.now(), click_to_view: true };
           saveDedup(dedup);
+          appendNews({ id: k, time: item.time, title: item.title, content: item.content,
+            skipped: true, skipReason: '点击查看', createdAt: Date.now() });
           continue;
         }
 
@@ -917,6 +896,8 @@ async function main() {
           log(`  🚫 日历/预告过滤: ${item.time} ${item.title?.substring(0, 30)}`);
           dedup[k] = { ts: Date.now(), calendar_preview: true };
           saveDedup(dedup);
+          appendNews({ id: k, time: item.time, title: item.title, content: item.content,
+            skipped: true, skipReason: '日历/预告', createdAt: Date.now() });
           continue;
         }
 

@@ -319,6 +319,60 @@
     }
     .nav-btn:hover { background: rgba(59,130,246,0.15); color: var(--text); }
     .nav-btn:disabled { opacity: 0.5; cursor: default; }
+
+    /* ── Skipped news card ──────────────────────────────────── */
+    .card.skipped {
+      opacity: 0.55;
+      border-left: 3px solid #f59e0b;
+    }
+    .skip-badge {
+      display: inline-block;
+      font-size: 0.65rem;
+      font-weight: 600;
+      padding: 1px 6px;
+      border-radius: 3px;
+      background: rgba(245,158,11,0.15);
+      color: #f59e0b;
+      margin-left: 6px;
+      vertical-align: middle;
+    }
+
+    /* ── Toggle switch ─────────────────────────────────────── */
+    .toggle-wrap {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      cursor: pointer;
+      user-select: none;
+    }
+    .toggle-switch {
+      position: relative;
+      width: 34px;
+      height: 18px;
+      background: var(--border);
+      border-radius: 9px;
+      transition: background 0.2s;
+      flex-shrink: 0;
+    }
+    .toggle-switch::after {
+      content: '';
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #fff;
+      transition: transform 0.2s;
+    }
+    .toggle-wrap.active .toggle-switch {
+      background: var(--accent);
+    }
+    .toggle-wrap.active .toggle-switch::after {
+      transform: translateX(16px);
+    }
   </style>
 </head>
 <body>
@@ -328,6 +382,10 @@
       <span id="status-dot"></span>
       <span id="status-text">加载中…</span>
       <button class="nav-btn" onclick="toggleDailyPanel()">📅 每日分析</button>
+      <label class="toggle-wrap" id="skipped-toggle" onclick="toggleSkipped()">
+        <span class="toggle-switch"></span>
+        <span>显示跳过</span>
+      </label>
       <a class="nav-btn" href="/config.html">⚙️ 配置</a>
       <button id="refresh-btn" onclick="refresh()">刷新</button>
     </div>
@@ -361,7 +419,19 @@
     let oldestCreatedAt = 0;
     let hasMore = false;
     let autoRefreshTimer = null;
+    let showSkipped = false;
     const PAGE_SIZE = 20;
+
+    function skippedParam() {
+      return showSkipped ? '&includeSkipped=1' : '';
+    }
+
+    function toggleSkipped() {
+      showSkipped = !showSkipped;
+      document.getElementById('skipped-toggle').classList.toggle('active', showSkipped);
+      // 重新加载全部新闻
+      loadNews(true);
+    }
 
     // ── Bootstrap ──────────────────────────────────────────────────────────
     async function init() {
@@ -382,7 +452,7 @@
 
       try {
         const before = reset ? 0 : (oldestCreatedAt || 0);
-        const url = `/api/news?limit=${PAGE_SIZE}` + (before > 0 ? `&before=${before}` : '');
+        const url = `/api/news?limit=${PAGE_SIZE}${skippedParam()}` + (before > 0 ? `&before=${before}` : '');
         const res = await fetch(url);
         const data = await res.json();
 
@@ -414,7 +484,7 @@
       const btn = document.getElementById('refresh-btn');
       btn.disabled = true;
       try {
-        const res = await fetch(`/api/news?limit=${PAGE_SIZE}`);
+        const res = await fetch(`/api/news?limit=${PAGE_SIZE}${skippedParam()}`);
         const data = await res.json();
         if (!data.ok) throw new Error('API error');
 
@@ -473,13 +543,16 @@
 
     function buildCard(item) {
       const card = document.createElement('div');
-      card.className = 'card';
+      card.className = item.skipped ? 'card skipped' : 'card';
       card.dataset.id = item.id;
 
       // Time
       const timeEl = document.createElement('div');
       timeEl.className = 'card-time';
       timeEl.textContent = item.time || fmtTime(new Date(item.createdAt));
+      if (item.skipped) {
+        timeEl.innerHTML += `<span class="skip-badge">${esc(item.skipReason || '已跳过')}</span>`;
+      }
       card.appendChild(timeEl);
 
       // Title (optional)
@@ -495,6 +568,9 @@
       contentEl.className = 'card-content';
       contentEl.textContent = item.content;
       card.appendChild(contentEl);
+
+      // Skipped news: no AI block or actions
+      if (item.skipped) return card;
 
       // AI analysis block
       if (item.analysis) {
