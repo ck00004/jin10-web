@@ -6,13 +6,13 @@
 ## 功能概览
 
 ```
-金十网页 → Playwright 抓取 → 去重过滤 → AI 分析（MiniMax） → 广告过滤 → Telegram 推送
-                                                                    ↓
-                                                          保存到 news.json
-                                                                    ↓
-                                                  内置 Web 服务器（默认 :3000）
-                                                                    ↓
-                                                         瀑布式 Web 页面展示
+金十网页 → Playwright 抓取 → 去重过滤 → AI 分析（多提供商）→ 广告过滤 → Telegram 推送
+                                                                     ↓
+                                                           保存到 news.json（无上限）
+                                                                     ↓
+                                                   内置 Web 服务器（默认 :3000）
+                                                                     ↓
+                                                          瀑布式 Web 页面展示
 ```
 
 ### 核心功能
@@ -20,13 +20,14 @@
 | 功能 | 说明 |
 |------|------|
 | 🔴 红色新闻抓取 | 每 60s 轮询金十数据网页，抓取 `is-important` 红色新闻 |
-| 🤖 AI 分析 | MiniMax-M2.5 分析（标的/方向/逻辑链/核心驱动/关键风险/确认信号/技术面 7 字段） |
+| �� 多提供商 AI | 支持 MiniMax / OpenAI / Gemini / Claude，依次尝试直到成功 |
 | 🌐 Web 展示 | 内置 HTTP 服务器，提供瀑布式新闻展示页面（自动刷新）|
 | 📡 Telegram 推送 | 实时推送到指定 Telegram 账号 |
 | 🚫 多层过滤 | 自动过滤广告、「点击查看」占位内容、周度日历/预告等低信息密度内容 |
 | 🔁 去重 | 72 小时去重窗口，避免重复推送 |
-| 🛡️ 熔断器 | AI 连续失败 5 次后暂停 5 分钟，保护下游 API |
+| 🛡️ 熔断器 | 所有提供商连续失败 5 次后暂停 5 分钟 |
 | 🔒 PID 锁 | 防止多实例同时运行 |
+| 💾 无上限存储 | news.json 无条数上限，历史新闻完整保留 |
 
 ## Web 页面
 
@@ -64,7 +65,7 @@ Web 服务器同时对外暴露以下 API 接口（可供第三方集成）：
   "total": 42,
   "hasMore": true,
   "items": [{ "id": "abc123", "time": "14:13:25", "title": "...", "content": "...",
-    "analysis": "标的：原油\n方向：利空 (85%)\n...", "analysisSource": "MiniMax-M2.5",
+    "analysis": "标的：原油\n方向：利空 (85%)\n...", "analysisSource": "OpenAI/gpt-4o",
     "technical": "...", "createdAt": 1710640405000 }]
 }
 ```
@@ -78,29 +79,64 @@ jin10-monitor/
 │   └── index.html    # 瀑布式 Web 页面
 ├── config.json       # 配置（需自行创建）
 ├── package.json      # 依赖
-├── news.json         # 新闻存储（运行时自动生成，最多 500 条）
+├── news.json         # 新闻存储（运行时自动生成，无上限）
 ├── dedup.json        # 去重数据（运行时自动生成）
 └── state.json        # 运行状态（运行时自动生成）
 ```
 
 ## 配置
 
-创建 `config.json`：
+创建 `config.json`（推荐多提供商配置）：
 
 ```json
 {
   "TELEGRAM_BOT_TOKEN": "your-bot-token",
   "TELEGRAM_CHAT_ID":   "your-chat-id",
-  "MINIMAX_API_KEY":    "your-minimax-api-key",
-  "WEB_PORT":           3000
+  "WEB_PORT": 3000,
+  "AI_PROVIDERS": [
+    { "type": "openai",   "apiKey": "sk-...",     "model": "gpt-4o" },
+    { "type": "gemini",   "apiKey": "AIza...",    "model": "gemini-1.5-pro" },
+    { "type": "claude",   "apiKey": "sk-ant-...", "model": "claude-3-5-sonnet-20241022" },
+    { "type": "minimax",  "apiKey": "your-minimax-api-key" }
+  ]
 }
 ```
+
+提供商按数组顺序尝试，第一个成功即返回，其余跳过。
+
+### 单提供商（向后兼容）
+
+旧配置格式仍可用，`MINIMAX_API_KEY` 会自动作为唯一 MiniMax 提供商：
+
+```json
+{
+  "MINIMAX_API_KEY": "your-minimax-api-key"
+}
+```
+
+### AI 提供商配置说明
+
+| `type` | 默认模型 | API 文档 |
+|--------|----------|----------|
+| `minimax` | MiniMax-M2.5 | https://api.minimaxi.com |
+| `openai` | gpt-4o | https://platform.openai.com/docs |
+| `gemini` | gemini-1.5-pro | https://ai.google.dev |
+| `claude` | claude-3-5-sonnet-20241022 | https://docs.anthropic.com |
+
+每个提供商配置项：
+
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| `type` | ✅ | 提供商类型（见上表）|
+| `apiKey` | ✅ | 对应平台的 API Key |
+| `model` | ❌ | 模型名称（不填使用上表默认值）|
+
+### 其他配置项
 
 | 字段 | 必填 | 默认 | 说明 |
 |------|------|------|------|
 | `TELEGRAM_BOT_TOKEN` | ❌ | — | Telegram Bot API Token（不配则不推送）|
 | `TELEGRAM_CHAT_ID` | ❌ | — | 推送目标 Chat ID |
-| `MINIMAX_API_KEY` | ❌ | — | MiniMax API Key（不配则跳过 AI 分析）|
 | `WEB_PORT` | ❌ | 3000 | Web 服务器监听端口 |
 
 ## 运行
@@ -121,7 +157,7 @@ nohup node monitor.mjs >> stdout.log 2>> stderr.log &
 启动后：
 - 监控程序开始抓取金十数据
 - Web 服务器在 `http://localhost:3000` 启动
-- 新闻及 AI 分析实时保存到 `news.json`，Web 页面自动刷新展示
+- 新闻及 AI 分析实时保存到 `news.json`（无上限），Web 页面自动刷新展示
 
 ### 停止
 
@@ -139,20 +175,28 @@ tail -f stdout.log   # 实时日志
 cat state.json       # 运行统计（推送次数、最近错误等）
 ```
 
-## 关键参数
+## 关键参数（代码内）
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
 | `POLL_MS` | 60,000ms | 轮询间隔 |
 | `DEDUP_HOURS` | 72h | 去重窗口 |
-| `MAX_NEWS_ITEMS` | 500 | news.json 最大保留条数 |
 | `HTTP_PORT` | 3000 | Web 服务器端口（`WEB_PORT` 配置）|
+
+## AI 提供商对比
+
+| 提供商 | 优点 | 适用场景 |
+|--------|------|----------|
+| OpenAI GPT-4o | 综合能力强，格式遵循好 | 首选主力 |
+| Gemini 1.5 Pro | 速度快，成本低 | 备用/大量分析 |
+| Claude | 格式严谨，中文表达好 | 高质量分析 |
+| MiniMax | 国内网络友好 | 国内环境备用 |
 
 ## API 依赖
 
 | 服务 | 用途 | 必填 |
 |------|------|------|
 | jin10.com | 新闻抓取来源 | ✅ |
-| MiniMax API | AI 分析 | ❌ |
+| OpenAI / Gemini / Claude / MiniMax | AI 分析（至少配一个）| ❌ |
 | Telegram Bot API | 消息推送 | ❌ |
 | TradingView | 技术面指标抓取 | ❌ |

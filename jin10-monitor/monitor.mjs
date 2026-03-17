@@ -20,15 +20,27 @@ const NEWS_FILE  = join(__dirname, 'news.json');
 const JIN10_URL = 'https://www.jin10.com/';
 const POLL_MS = 60_000;
 const DEDUP_HOURS = 72;
-const MAX_NEWS_ITEMS = 500;
 
 // 从 config.json 读取配置
 const cfg = existsSync(join(__dirname, 'config.json')) 
   ? JSON.parse(readFileSync(join(__dirname, 'config.json'), 'utf-8')) : {};
 const TG_TOKEN = cfg.TELEGRAM_BOT_TOKEN || '';
 const TG_CHAT_ID = cfg.TELEGRAM_CHAT_ID || '';
-const AI_API_KEY = cfg.MINIMAX_API_KEY || '';
 const HTTP_PORT = cfg.WEB_PORT || 3000;
+
+// AI 提供商配置（支持 minimax / openai / gemini / claude）
+// 新格式：AI_PROVIDERS 数组；旧格式：MINIMAX_API_KEY（向后兼容）
+function loadAiProviders() {
+  const providers = Array.isArray(cfg.AI_PROVIDERS)
+    ? cfg.AI_PROVIDERS.filter(p => p && p.type && p.apiKey)
+    : [];
+  // 向后兼容：MINIMAX_API_KEY 仍可用，自动置于列表首位
+  if (cfg.MINIMAX_API_KEY && !providers.some(p => p.type === 'minimax')) {
+    providers.unshift({ type: 'minimax', apiKey: cfg.MINIMAX_API_KEY });
+  }
+  return providers;
+}
+const AI_PROVIDERS = loadAiProviders();
 
 // 工具函数
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -108,7 +120,7 @@ function loadNews() {
 function appendNews(entry) {
   const items = loadNews();
   items.unshift(entry);
-  writeFileSync(NEWS_FILE, JSON.stringify({ items: items.slice(0, MAX_NEWS_ITEMS) }, null, 2));
+  writeFileSync(NEWS_FILE, JSON.stringify({ items }, null, 2));
 }
 
 // 广告过滤
@@ -337,12 +349,110 @@ async function buildTechnicalSummary(analysisText) {
   return lines.join('\n');
 }
 
-// AI 分析 - 直接调用 MiniMax API，保留完整 7 行格式校验和熔断机制
+// 各 AI 提供商调用函数
+
+async function callMinimax(apiKey, model, prompt, timeoutMs) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    // MiniMax 提供 Anthropic 兼容接口（路径含 /anthropic/ 但实为 MiniMax 平台）
+    const r = await fetch('https://api.minimaxi.com/anthropic/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: model || 'MiniMax-M2.5', max_tokens: 1024, messages: [{ role: 'user', content: prompt }] }),
+      signal: ctrl.signal,
+    });
+    const d = await r.json();
+    if (d.content && Array.isArray(d.content)) {
+      const blk = d.content.find(b => b.type === 'text' && b.text);
+      if (blk) return { text: blk.text.trim(), source: `MiniMax/${model || 'MiniMax-M2.5'}` };
+    }
+    throw new Error(d.error?.message || 'empty response');
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function callOpenai(apiKey, model, prompt, timeoutMs) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const r = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+      body: JSON.stringify({ model: model || 'gpt-4o', max_tokens: 1024, messages: [{ role: 'user', content: prompt }] }),
+      signal: ctrl.signal,
+    });
+    const d = await r.json();
+    const txt = d.choices?.[0]?.message?.content?.trim();
+    if (txt) return { text: txt, source: `OpenAI/${model || 'gpt-4o'}` };
+    throw new Error(d.error?.message || 'empty response');
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function callGemini(apiKey, model, prompt, timeoutMs) {
+  const m = model || 'gemini-1.5-pro';
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const r = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(m)}:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+        signal: ctrl.signal,
+      }
+    );
+    const d = await r.json();
+    const txt = d.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+    if (txt) return { text: txt, source: `Gemini/${m}` };
+    throw new Error(d.error?.message || 'empty response');
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function callClaude(apiKey, model, prompt, timeoutMs) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: model || 'claude-3-5-sonnet-20241022', max_tokens: 1024, messages: [{ role: 'user', content: prompt }] }),
+      signal: ctrl.signal,
+    });
+    const d = await r.json();
+    if (d.content && Array.isArray(d.content)) {
+      const blk = d.content.find(b => b.type === 'text' && b.text);
+      if (blk) return { text: blk.text.trim(), source: `Claude/${model || 'claude-3-5-sonnet-20241022'}` };
+    }
+    throw new Error(d.error?.message || 'empty response');
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function callProvider(provider, prompt, timeoutMs) {
+  const { type, apiKey, model } = provider;
+  switch (type) {
+    case 'minimax': return callMinimax(apiKey, model, prompt, timeoutMs);
+    case 'openai':  return callOpenai(apiKey, model, prompt, timeoutMs);
+    case 'gemini':  return callGemini(apiKey, model, prompt, timeoutMs);
+    case 'claude':  return callClaude(apiKey, model, prompt, timeoutMs);
+    default: throw new Error(`unknown provider type: ${type}`);
+  }
+}
+
+// AI 分析 - 依次尝试所有配置的提供商，保留格式校验和熔断机制
 async function analyze(item, state) {
   const now = Date.now();
   if (state?.aiDisabledUntil && now < state.aiDisabledUntil) return null;
-  if (!AI_API_KEY) {
-    logErr('AI: 没有配置 MINIMAX_API_KEY');
+  if (AI_PROVIDERS.length === 0) {
+    logErr('AI: 未配置任何 AI 提供商（请在 config.json 中设置 AI_PROVIDERS 或 MINIMAX_API_KEY）');
     return null;
   }
 
@@ -378,42 +488,30 @@ async function analyze(item, state) {
     return hasRequired && !hasLegacy;
   };
 
-  const plan = [20_000, 30_000];
-  for (let i = 0; i < plan.length; i++) {
-    try {
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), plan[i]);
-      const r = await fetch('https://api.minimaxi.com/anthropic/v1/messages', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': AI_API_KEY, 'anthropic-version': '2023-06-01' },
-        body: JSON.stringify({ model: 'MiniMax-M2.5', max_tokens: 1024, messages: [{ role: 'user', content: prompt }] }),
-        signal: ctrl.signal,
-      });
-      clearTimeout(timer);
-      const d = await r.json();
-      let txt = null;
-      if (d.content && Array.isArray(d.content)) {
-        const blk = d.content.find(b => b.type === 'text' && b.text);
-        if (blk) txt = blk.text.trim();
+  // 两轮重试：第一轮 20s 超时，第二轮 30s 超时；每轮依次尝试所有提供商
+  const timeouts = [20_000, 30_000];
+  for (const timeoutMs of timeouts) {
+    for (const provider of AI_PROVIDERS) {
+      try {
+        const res = await callProvider(provider, prompt, timeoutMs);
+        if (!looksOk(res?.text)) throw new Error('bad format (missing required fields)');
+        state.aiFailConsecutive = 0;
+        state.aiDisabledUntil = null;
+        saveState(state);
+        log(`🤖 AI (${res.source}): OK`);
+        return res;
+      } catch (e) {
+        logErr(`AI (${provider.type}): ${e.message}`);
+        await sleep(500);
       }
-      if (!txt) throw new Error('empty response');
-      if (!looksOk(txt)) throw new Error('bad format (missing required fields)');
-      state.aiFailConsecutive = 0;
-      state.aiDisabledUntil = null;
-      saveState(state);
-      log(`🤖 AI (minimax): OK`);
-      return { text: txt, source: 'MiniMax-M2.5' };
-    } catch (e) {
-      logErr(`AI (minimax): ${e.message}`);
-      await sleep(900 + i * 900);
     }
   }
 
   state.aiFailConsecutive = (state.aiFailConsecutive || 0) + 1;
   state.lastErrorAt = Date.now();
-  state.lastError = 'AI(minimax): failed';
+  state.lastError = 'AI: all providers failed';
 
-  // 熔断：连续失败 5 次后暂停 5 分钟
+  // 熔断：全部提供商连续失败 5 次后暂停 5 分钟
   const N = 5;
   const COOL_MS = 5 * 60_000;
   if (state.aiFailConsecutive >= N) {
@@ -424,6 +522,7 @@ async function analyze(item, state) {
 
   return null;
 }
+
 // 抓取逻辑
 const SCRAPE_EVAL = () => {
   const out = [];
