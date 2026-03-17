@@ -24,8 +24,6 @@ const DEDUP_HOURS = 72;
 // 从 config.json 读取配置
 const cfg = existsSync(join(__dirname, 'config.json')) 
   ? JSON.parse(readFileSync(join(__dirname, 'config.json'), 'utf-8')) : {};
-const TG_TOKEN = cfg.TELEGRAM_BOT_TOKEN || '';
-const TG_CHAT_ID = cfg.TELEGRAM_CHAT_ID || '';
 const HTTP_PORT = cfg.WEB_PORT || 3000;
 
 // AI 提供商配置（支持 minimax / openai / gemini / claude）
@@ -48,8 +46,6 @@ const ts = () => new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Shanghai' 
 
 function log(m) { console.log(`[${ts()}] ${m}`); }
 function logErr(m) { console.error(`[${ts()}] ERROR: ${m}`); appendFileSync(join(__dirname, 'errors.log'), `[${ts()}] ${m}\n`); }
-function esc(t) { return t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
-function mdToHtml(t) { return t.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>'); }
 
 // 确保只有一个实例
 function acquireLock() {
@@ -162,37 +158,6 @@ function isCalendarPreview(item) {
   }
 
   return false;
-}
-
-// Telegram
-async function tgSend(text) {
-  if (!TG_TOKEN || !TG_CHAT_ID) return;
-  try {
-    await fetch(`https://api.telegram.org/bot${TG_TOKEN}/sendMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: TG_CHAT_ID, text, parse_mode: 'HTML', disable_web_page_preview: true }),
-    });
-  } catch (e) { logErr(`TG: ${e.message}`); }
-}
-
-function fmtMsg(item, analysis = '', analysisSource = '', analysisError = '', technical = '') {
-  const t = item.title ? `\n📌 <b>${esc(item.title)}</b>` : '';
-  const src = analysisSource ? `（${esc(analysisSource)}）` : '';
-
-  let a;
-  if (analysis) {
-    a = `\n\n📊 <b>AI 分析${src}</b>\n${esc(mdToHtml(analysis)).replace(/&lt;b&gt;/g, '<b>').replace(/&lt;\/b&gt;/g, '</b>').replace(/\n\n/g, '\n')}`;
-  } else {
-    const reason = analysisError ? `：${esc(analysisError)}` : '';
-    a = `\n\n🤖 <b>AI 分析</b>${reason}\n<i>本条未生成分析（已合并在同一条消息里，避免补发/拆分）</i>`;
-  }
-
-  const techBlock = technical
-    ? `\n\n📈 <b>技术面（人话）</b>\n${esc(mdToHtml(technical)).replace(/&lt;b&gt;/g, '<b>').replace(/&lt;\/b&gt;/g, '</b>').replace(/\n\n/g, '\n')}`
-    : '';
-
-  return `📡 <b>金十重要新闻推送</b>\n⏰ ${esc(item.time)}${t}\n${esc(item.content)}${a}${techBlock}`;
 }
 
 function extractTickersFromAnalysis(analysisText) {
@@ -733,7 +698,6 @@ async function main() {
         }
 
         const technical = await buildTechnicalSummary(analysisText);
-        await tgSend(fmtMsg(item, analysisText, analysisSource, analysisError, technical));
         state.lastPushAt = Date.now();
         await sleep(500);
 
@@ -746,7 +710,7 @@ async function main() {
           analysis: analysisText, analysisSource, analysisError, technical,
           createdAt: Date.now() });
 
-        log(`  ✅ 已推送`);
+        log(`  ✅ 已处理`);
       }
       
       // 清理旧去重
