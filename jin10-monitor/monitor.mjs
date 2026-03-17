@@ -3,37 +3,32 @@
  * 金十红色新闻监控 - 彻底解决重复推送问题
  */
 
-import { readFileSync, writeFileSync, existsSync, appendFileSync, unlinkSync, mkdirSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, appendFileSync, unlinkSync } from 'fs';
 import { createHash } from 'crypto';
-import { join, dirname } from 'path';
+import { join, dirname, extname, resolve } from 'path';
 import { fileURLToPath } from 'url';
-import { execFile } from 'child_process';
+import { createServer } from 'http';
 import { chromium } from 'playwright';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const LOCK_FILE = join(__dirname, '.lock');
 const DEDUP_FILE = join(__dirname, 'dedup.json');
 const STATE_FILE = join(__dirname, 'state.json');
+const NEWS_FILE  = join(__dirname, 'news.json');
 
 // 配置
 const JIN10_URL = 'https://www.jin10.com/';
 const POLL_MS = 60_000;
-const CDP_PORT = 18800;
 const DEDUP_HOURS = 72;
+const MAX_NEWS_ITEMS = 500;
 
 // 从 config.json 读取配置
 const cfg = existsSync(join(__dirname, 'config.json')) 
   ? JSON.parse(readFileSync(join(__dirname, 'config.json'), 'utf-8')) : {};
 const TG_TOKEN = cfg.TELEGRAM_BOT_TOKEN || '';
 const TG_CHAT_ID = cfg.TELEGRAM_CHAT_ID || '';
-
-// AI analysis: we intentionally do NOT use minimax fallback.
-// The goal is: always route through OpenClaw's main model chain (yunyi-codex) for stability.
 const AI_API_KEY = cfg.MINIMAX_API_KEY || '';
-const OPENCLAW_BIN = cfg.OPENCLAW_BIN || 'openclaw';
-// Use a versioned session id so prompt format changes take effect immediately
-// (otherwise the model may follow earlier in-session formatting).
-const OPENCLAW_AI_SESSION = cfg.OPENCLAW_AI_SESSION || 'jin10-ai-v4';
+const HTTP_PORT = cfg.WEB_PORT || 3000;
 
 // 工具函数
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -104,6 +99,17 @@ function cleanDedup(d) {
   return Object.fromEntries(Object.entries(d).filter(([, v]) => v.ts > cut));
 }
 function getKey(item) { return createHash('sha1').update(item.time + '|' + item.content.substring(0,100)).digest('hex'); }
+
+// 新闻存储（供 Web 页面展示）
+function loadNews() {
+  if (!existsSync(NEWS_FILE)) return [];
+  try { return JSON.parse(readFileSync(NEWS_FILE, 'utf-8')).items || []; } catch { return []; }
+}
+function appendNews(entry) {
+  const items = loadNews();
+  items.unshift(entry);
+  writeFileSync(NEWS_FILE, JSON.stringify({ items: items.slice(0, MAX_NEWS_ITEMS) }, null, 2));
+}
 
 // 广告过滤
 const AD_PATTERNS = /(?:\d+折.*VIP|VIP[·\s]*\d*折|VIP.*折|立省\d+|立即抢购|限时|优惠|折扣|新春福利|解锁.*利器|领取.*礼|猜金价|竞猜.*赢|资金监测器)/;
@@ -331,51 +337,26 @@ async function buildTechnicalSummary(analysisText) {
   return lines.join('\n');
 }
 
-// AI 分析 - 最硬的一招：通过 OpenClaw 自己的调用链路跑主模型（yunyi-codex），
-// 复用网关的重试/超时/连接策略，避免脚本裸奔直连造成的 502/超时。
+// AI 分析 - 直接调用 MiniMax API，保留完整 7 行格式校验和熔断机制
 async function analyze(item, state) {
   const now = Date.now();
   if (state?.aiDisabledUntil && now < state.aiDisabledUntil) return null;
+  if (!AI_API_KEY) {
+    logErr('AI: 没有配置 MINIMAX_API_KEY');
+    return null;
+  }
 
-  const prompt = `你是一个“可交易”的金融快讯分析器。请严格按下面格式输出，仅允许这 7 行（每行一句），不允许出现其他行/空行/项目符号。注意：第二行的字段名必须是“方向：”，不要输出“判断：/说明：/结论：”。
+  const prompt = `你是一个"可交易"的金融快讯分析器。请严格按下面格式输出，仅允许这 7 行（每行一句），不允许出现其他行/空行/项目符号。注意：第二行的字段名必须是"方向："，不要输出"判断：/说明：/结论："。
 
-标的：给出最相关的交易标的（1-3 个），优先：美股/指数/中概/加密/港股/A股；用逗号分隔；不确定就写“未知”
-方向：只允许输出“利好/利空/中性 + 置信度(0-100)”，不要写“判断/说明/结论”
-逻辑链：用“→”写 3-5 步因果链，从新闻到标的价格
+标的：给出最相关的交易标的（1-3 个），优先：美股/指数/中概/加密/港股/A股；用逗号分隔；不确定就写"未知"
+方向：只允许输出"利好/利空/中性 + 置信度(0-100)"，不要写"判断/说明/结论"
+逻辑链：用"→"写 3-5 步因果链，从新闻到标的价格
 核心驱动：一句话点名定价因子（利率预期/风险偏好/盈利预期/监管/资金面/供需/汇率等）
 关键风险：只写 1-2 条，必须具体
 确认信号：只写 1-2 个，必须可验证（例如 2Y/10Y、DXY、期指、成交量、后续数据/发言）
-技术面：对“标的”里最相关的 1-2 个给出 RSI(14)/EMA20/EMA50/SMA200（仅用 TradingView 技术面数据；拿不到就写“缺数据”）
+技术面：对"标的"里最相关的 1-2 个给出 RSI(14)/EMA20/EMA50/SMA200（仅用 TradingView 技术面数据；拿不到就写"缺数据"）
 
 新闻："${item.title || ''} ${item.content}"`;
-
-  const runOpenclaw = (timeoutMs) => new Promise((resolve, reject) => {
-    const args = [
-      'agent',
-      '--session-id',
-      OPENCLAW_AI_SESSION,
-      '--channel',
-      'last',
-      '--message',
-      prompt,
-      '--json',
-      '--timeout',
-      String(Math.ceil(timeoutMs / 1000)),
-    ];
-
-    execFile(OPENCLAW_BIN, args, { timeout: timeoutMs, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
-      if (err) return reject(new Error(stderr?.trim() || err.message));
-      try {
-        const out = JSON.parse(String(stdout || '{}'));
-        const txt = out?.result?.payloads?.[0]?.text;
-        const model = out?.result?.meta?.agentMeta?.model || out?.result?.meta?.systemPromptReport?.model || '';
-        if (typeof txt === 'string' && txt.trim()) return resolve({ text: txt.trim(), model });
-        return reject(new Error('bad openclaw response'));
-      } catch (e) {
-        return reject(new Error(`openclaw json parse error: ${e.message}`));
-      }
-    });
-  });
 
   const looksOk = (t) => {
     const s = String(t || '').trim();
@@ -388,42 +369,51 @@ async function analyze(item, state) {
       /^确认信号：/m.test(s) &&
       /^技术面：/m.test(s)
     );
-
     const hasLegacy = (
       /^结论：/m.test(s) ||
       /^驱动：/m.test(s) ||
       /^风险：/m.test(s) ||
       /^关注：/m.test(s)
     );
-
     return hasRequired && !hasLegacy;
   };
 
-  // 稳定性策略：最多 2 次重试 + 小退避（openclaw 内部也会重试，所以这里不用太激进）。
-  // 同时做格式校验：如果没按 4 行格式输出，就视为失败再试一次。
-  const plan = [90_000, 120_000];
+  const plan = [20_000, 30_000];
   for (let i = 0; i < plan.length; i++) {
     try {
-      const res = await runOpenclaw(plan[i]);
-      if (!looksOk(res?.text)) {
-        throw new Error('bad format (missing 标的/方向/逻辑链/核心驱动/关键风险/确认信号/技术面)');
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), plan[i]);
+      const r = await fetch('https://api.minimaxi.com/anthropic/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': AI_API_KEY, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify({ model: 'MiniMax-M2.5', max_tokens: 1024, messages: [{ role: 'user', content: prompt }] }),
+        signal: ctrl.signal,
+      });
+      clearTimeout(timer);
+      const d = await r.json();
+      let txt = null;
+      if (d.content && Array.isArray(d.content)) {
+        const blk = d.content.find(b => b.type === 'text' && b.text);
+        if (blk) txt = blk.text.trim();
       }
+      if (!txt) throw new Error('empty response');
+      if (!looksOk(txt)) throw new Error('bad format (missing required fields)');
       state.aiFailConsecutive = 0;
       state.aiDisabledUntil = null;
       saveState(state);
-      log(`🤖 AI (openclaw/${res?.model || 'unknown'}): OK`);
-      return { text: res?.text || '', source: res?.model || 'openclaw' };
+      log(`🤖 AI (minimax): OK`);
+      return { text: txt, source: 'MiniMax-M2.5' };
     } catch (e) {
-      logErr(`AI (openclaw): ${e.message}`);
+      logErr(`AI (minimax): ${e.message}`);
       await sleep(900 + i * 900);
     }
   }
 
   state.aiFailConsecutive = (state.aiFailConsecutive || 0) + 1;
   state.lastErrorAt = Date.now();
-  state.lastError = 'AI(openclaw): failed';
+  state.lastError = 'AI(minimax): failed';
 
-  // circuit breaker
+  // 熔断：连续失败 5 次后暂停 5 分钟
   const N = 5;
   const COOL_MS = 5 * 60_000;
   if (state.aiFailConsecutive >= N) {
@@ -434,7 +424,6 @@ async function analyze(item, state) {
 
   return null;
 }
-
 // 抓取逻辑
 const SCRAPE_EVAL = () => {
   const out = [];
@@ -476,10 +465,93 @@ async function getPage() {
   return page;
 }
 
+
+// Web 服务器 - 提供 REST API 和静态页面
+function startWebServer() {
+  const publicDir = join(__dirname, 'public');
+  const MIME = {
+    '.html': 'text/html; charset=utf-8',
+    '.css':  'text/css; charset=utf-8',
+    '.js':   'application/javascript; charset=utf-8',
+    '.json': 'application/json',
+    '.ico':  'image/x-icon',
+    '.png':  'image/png',
+    '.svg':  'image/svg+xml',
+  };
+
+  const server = createServer((req, res) => {
+    const url = new URL(req.url, `http://localhost:${HTTP_PORT}`);
+    const pathname = url.pathname;
+
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+    if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+
+    // ── API routes ──────────────────────────────────────────────────────────
+    if (pathname === '/api/health') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, time: new Date().toISOString() }));
+      return;
+    }
+
+    if (pathname === '/api/status') {
+      const state = loadState();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, ...state }));
+      return;
+    }
+
+    if (pathname === '/api/news') {
+      const limit  = Math.min(parseInt(url.searchParams.get('limit')  || '20', 10), 100);
+      const before = parseInt(url.searchParams.get('before') || '0', 10);
+      const items  = loadNews();
+      const pool   = before > 0 ? items.filter(n => n.createdAt < before) : items;
+      const page   = pool.slice(0, limit);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, items: page, total: items.length, hasMore: pool.length > limit }));
+      return;
+    }
+
+    // ── Static files ─────────────────────────────────────────────────────────
+    const filePath = pathname === '/' ? '/index.html' : pathname;
+    const fullPath = resolve(publicDir, '.' + filePath);
+    const ext = extname(fullPath);
+
+    // Prevent path traversal: resolved path must stay inside publicDir
+    if (!fullPath.startsWith(publicDir + '/') && fullPath !== publicDir) {
+      res.writeHead(403, { 'Content-Type': 'text/plain' });
+      res.end('Forbidden');
+      return;
+    }
+
+    if (existsSync(fullPath)) {
+      try {
+        const data = readFileSync(fullPath);
+        res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
+        res.end(data);
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'text/plain' });
+        res.end('Internal Server Error');
+      }
+    } else {
+      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      res.end('Not Found');
+    }
+  });
+
+  server.listen(HTTP_PORT, () => {
+    log(`🌐 Web 服务器启动: http://localhost:${HTTP_PORT}`);
+  });
+  return server;
+}
+
 // 主程序
 async function main() {
   acquireLock();
   log('🔴 金十监控启动');
+  startWebServer();
 
   await connectBrowser();
   let page = await getPage();
@@ -487,9 +559,6 @@ async function main() {
 
   let dedup = loadDedup();
   let state = loadState();
-  // NOTE: Kevin prefers "原文 + AI 分析" in a single message.
-  // So we do AI analysis inline (best-effort) and never do separate "补发" messages.
-
   let loop = 0;
 
   while (true) {
@@ -572,6 +641,12 @@ async function main() {
         // 立即保存
         dedup[k] = { ts: Date.now() };
         saveDedup(dedup);
+
+        // 保存到新闻存储（供 Web 页面展示）
+        appendNews({ id: k, time: item.time, title: item.title, content: item.content,
+          analysis: analysisText, analysisSource, analysisError, technical,
+          createdAt: Date.now() });
+
         log(`  ✅ 已推送`);
       }
       
