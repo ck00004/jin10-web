@@ -89,10 +89,11 @@
     #refresh-btn:hover { opacity: 0.85; }
     #refresh-btn:disabled { opacity: 0.5; cursor: default; }
 
-    /* ── Waterfall layout ───────────────────────────────────── */
+    /* ── Grid layout (横向排列) ──────────────────────────────── */
     #news-grid {
-      columns: 3 320px;
-      column-gap: var(--gap);
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: var(--gap);
       padding: var(--gap) 16px 40px;
       max-width: 1600px;
       margin: 0 auto;
@@ -100,12 +101,10 @@
 
     /* ── Card ───────────────────────────────────────────────── */
     .card {
-      break-inside: avoid;
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: var(--card-radius);
       padding: 14px 16px;
-      margin-bottom: var(--gap);
       transition: transform 0.15s, box-shadow 0.15s;
     }
     .card:hover {
@@ -244,8 +243,11 @@
     #load-more-btn:disabled { opacity: 0.5; cursor: default; }
 
     /* ── Responsive ─────────────────────────────────────────── */
+    @media (max-width: 1024px) {
+      #news-grid { grid-template-columns: repeat(2, 1fr); }
+    }
     @media (max-width: 680px) {
-      #news-grid { columns: 1; padding: 10px; }
+      #news-grid { grid-template-columns: 1fr; padding: 10px; }
       header h1 { font-size: 1rem; }
     }
 
@@ -524,9 +526,13 @@
       const placeholder = document.getElementById('loading');
       if (placeholder) placeholder.remove();
 
-      if (items.length === 0 && !append && !prepend) {
-        grid.innerHTML = '<div id="loading" style="text-align:center;padding:60px 20px;color:var(--text-muted)">暂无新闻数据</div>';
-        return;
+      // reset 模式：清空整个 grid 再重新渲染
+      if (!append && !prepend) {
+        grid.innerHTML = '';
+        if (items.length === 0) {
+          grid.innerHTML = '<div id="loading" style="text-align:center;padding:60px 20px;color:var(--text-muted);grid-column:1/-1">暂无新闻数据</div>';
+          return;
+        }
       }
 
       const fragment = document.createDocumentFragment();
