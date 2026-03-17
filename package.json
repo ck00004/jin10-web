@@ -1,7 +1,7 @@
 {
   "name": "jin10-web",
-  "version": "1.0.0",
-  "description": "金十红色新闻监控",
+  "version": "2.0.0",
+  "description": "金十重要新闻监控 + AI 分析 + Web 展示页面",
   "main": "monitor.mjs",
   "type": "module",
   "scripts": {
@@ -13,6 +13,6 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "playwright": "^1.50.0"
+    "playwright": "^1.58.2"
   }
 }

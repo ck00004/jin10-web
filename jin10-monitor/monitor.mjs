@@ -35,6 +35,7 @@ function saveConfigFile(newCfg) {
 }
 let cfg = loadConfigFile();
 const HTTP_PORT = cfg.WEB_PORT || 3000;
+const HTTP_HOST = cfg.WEB_HOST || '0.0.0.0';
 
 // AI 提供商配置（支持 minimax / openai / gemini / claude）
 // 新格式：AI_PROVIDERS 数组，每项支持 type/apiKey/model/baseUrl；旧格式：MINIMAX_API_KEY（向后兼容）
@@ -136,6 +137,15 @@ function appendNews(entry) {
   const items = loadNews();
   items.unshift(entry);
   writeFileSync(NEWS_FILE, JSON.stringify({ items }, null, 2));
+}
+
+function updateNewsItem(id, updates) {
+  const items = loadNews();
+  const idx = items.findIndex(n => n.id === id);
+  if (idx === -1) return false;
+  items[idx] = { ...items[idx], ...updates };
+  writeFileSync(NEWS_FILE, JSON.stringify({ items }, null, 2));
+  return true;
 }
 
 // 广告过滤
@@ -444,10 +454,7 @@ async function callProvider(provider, prompt, timeoutMs) {
 async function analyze(item, state) {
   const now = Date.now();
   if (state?.aiDisabledUntil && now < state.aiDisabledUntil) return null;
-  if (AI_PROVIDERS.length === 0) {
-    logErr('AI: 未配置任何 AI 提供商（请在 config.json 中设置 AI_PROVIDERS 或 MINIMAX_API_KEY）');
-    return null;
-  }
+  if (AI_PROVIDERS.length === 0) return null;
 
   const prompt = `你是一个"可交易"的金融快讯分析器。请严格按下面格式输出，仅允许这 7 行（每行一句），不允许出现其他行/空行/项目符号。注意：第二行的字段名必须是"方向："，不要输出"判断：/说明：/结论："。
 
@@ -754,6 +761,51 @@ function startWebServer() {
         return;
       }
 
+      // ── Re-analyze a single news item ─────────────────────────────────────
+      if (pathname === '/api/news/reanalyze' && req.method === 'POST') {
+        let body;
+        try { body = await readRequestBody(req, res); } catch (e) {
+          if (!res.headersSent) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: false, error: e.message }));
+          }
+          return;
+        }
+        const { id } = body;
+        if (!id) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: 'id is required' }));
+          return;
+        }
+        const newsItems = loadNews();
+        const newsItem = newsItems.find(n => n.id === id);
+        if (!newsItem) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: '新闻条目不存在' }));
+          return;
+        }
+        if (AI_PROVIDERS.length === 0) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: '未配置任何 AI 提供商，请先在配置页面添加 AI 提供商' }));
+          return;
+        }
+        try {
+          const state = loadState();
+          const result = await analyze(newsItem, state);
+          const analysisText = result?.text || '';
+          const analysisSource = result?.source || '';
+          const analysisError = analysisText ? '' : '暂不可用';
+          const technical = analysisText ? await buildTechnicalSummary(analysisText) : '';
+          updateNewsItem(id, { analysis: analysisText, analysisSource, analysisError, technical });
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true, analysis: analysisText, analysisSource, analysisError, technical }));
+        } catch (e) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: e.message }));
+        }
+        return;
+      }
+
       // ── Static files ─────────────────────────────────────────────────────────
       const filePath = pathname === '/' ? '/index.html' : pathname;
       const fullPath = resolve(publicDir, '.' + filePath);
@@ -787,8 +839,9 @@ function startWebServer() {
     }
   });
 
-  server.listen(HTTP_PORT, () => {
-    log(`🌐 Web 服务器启动: http://localhost:${HTTP_PORT}`);
+  server.listen(HTTP_PORT, HTTP_HOST, () => {
+    const displayHost = HTTP_HOST === '0.0.0.0' ? `localhost` : HTTP_HOST;
+    log(`🌐 Web 服务器启动: http://${displayHost}:${HTTP_PORT} (监听 ${HTTP_HOST})`);
   });
   return server;
 }
@@ -870,13 +923,15 @@ async function main() {
         let analysisText = '';
         let analysisSource = '';
         let analysisError = '';
-        try {
-          const res = await analyze(item, state);
-          analysisText = res?.text || '';
-          analysisSource = res?.source || '';
-          if (!analysisText) analysisError = '暂不可用';
-        } catch (e) {
-          analysisError = e?.message ? String(e.message).slice(0, 120) : '暂不可用';
+        if (AI_PROVIDERS.length > 0) {
+          try {
+            const res = await analyze(item, state);
+            analysisText = res?.text || '';
+            analysisSource = res?.source || '';
+            if (!analysisText) analysisError = '暂不可用';
+          } catch (e) {
+            analysisError = e?.message ? String(e.message).slice(0, 120) : '暂不可用';
+          }
         }
 
         const technical = await buildTechnicalSummary(analysisText);
