@@ -248,6 +248,56 @@
       #news-grid { columns: 1; padding: 10px; }
       header h1 { font-size: 1rem; }
     }
+
+    /* ── Daily Analysis Panel ────────────────────────────────── */
+    #daily-panel {
+      display: none;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 16px 20px;
+    }
+    #daily-panel.visible { display: block; }
+    #daily-panel-inner {
+      max-width: 1600px;
+      margin: 0 auto;
+    }
+    #daily-panel h2 {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 8px;
+    }
+    #daily-meta {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      margin-bottom: 10px;
+    }
+    .daily-row {
+      display: grid;
+      grid-template-columns: 6.5em 1fr;
+      gap: 3px 8px;
+      margin-bottom: 5px;
+      font-size: 0.82rem;
+      line-height: 1.7;
+    }
+    .daily-row-label { color: var(--text-muted); padding-top: 2px; white-space: nowrap; }
+    #daily-empty { font-size: 0.82rem; color: var(--text-muted); font-style: italic; }
+    .daily-actions { margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap; }
+    .nav-btn {
+      padding: 5px 12px;
+      background: var(--surface2);
+      color: var(--text-muted);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.78rem;
+      font-family: inherit;
+      text-decoration: none;
+      transition: background 0.2s, color 0.2s;
+      display: inline-block;
+    }
+    .nav-btn:hover { background: rgba(59,130,246,0.15); color: var(--text); }
+    .nav-btn:disabled { opacity: 0.5; cursor: default; }
   </style>
 </head>
 <body>
@@ -256,9 +306,25 @@
     <div id="status-bar">
       <span id="status-dot"></span>
       <span id="status-text">加载中…</span>
+      <button class="nav-btn" onclick="toggleDailyPanel()">📅 每日分析</button>
+      <a class="nav-btn" href="/config.html">⚙️ 配置</a>
       <button id="refresh-btn" onclick="refresh()">刷新</button>
     </div>
   </header>
+
+  <!-- Daily Analysis Panel -->
+  <div id="daily-panel">
+    <div id="daily-panel-inner">
+      <h2>📅 每日新闻综合分析</h2>
+      <div id="daily-meta">加载中…</div>
+      <div id="daily-rows"></div>
+      <div id="daily-empty" style="display:none">今日暂无每日分析，可点击下方按钮生成</div>
+      <div class="daily-actions">
+        <button class="nav-btn" id="daily-trigger-btn" onclick="triggerDailyAnalysis()">🤖 生成今日分析</button>
+        <button class="nav-btn" onclick="loadDailyAnalysis()">🔄 刷新</button>
+      </div>
+    </div>
+  </div>
 
   <div id="news-grid">
     <div id="loading">正在加载新闻…</div>
@@ -576,6 +642,108 @@
 
     // ── Start ──────────────────────────────────────────────────────────────
     init();
+
+    // ── Daily Analysis ─────────────────────────────────────────────────────
+    let dailyPanelVisible = false;
+
+    function toggleDailyPanel() {
+      dailyPanelVisible = !dailyPanelVisible;
+      const panel = document.getElementById('daily-panel');
+      panel.classList.toggle('visible', dailyPanelVisible);
+      if (dailyPanelVisible) loadDailyAnalysis();
+    }
+
+    async function loadDailyAnalysis() {
+      const meta = document.getElementById('daily-meta');
+      const rows = document.getElementById('daily-rows');
+      const empty = document.getElementById('daily-empty');
+      meta.textContent = '加载中…';
+      rows.innerHTML = '';
+      empty.style.display = 'none';
+      try {
+        const res = await fetch('/api/daily-analysis');
+        const d = await res.json();
+        if (!d.ok) throw new Error('API error');
+        const entry = d.analysis;
+        if (!entry) {
+          meta.textContent = `日期：${d.date} · 暂无分析`;
+          empty.style.display = 'block';
+          return;
+        }
+        const genAt = new Date(entry.generatedAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
+        meta.textContent = `日期：${d.date} · 共 ${entry.newsCount} 条新闻 · 生成于 ${genAt} · 来源：${entry.source || '—'}`;
+        rows.innerHTML = '';
+        const DAILY_FIELDS = [
+          ['市场概述', '市场概述'],
+          ['主要主题', '主要主题'],
+          ['利好资产', '利好资产'],
+          ['利空资产', '利空资产'],
+          ['核心驱动', '核心驱动'],
+          ['明日关注', '明日关注'],
+          ['风险提示', '风险提示'],
+        ];
+        const parsed = parseDailyAnalysis(entry.text);
+        let hasAny = false;
+        for (const [key, label] of DAILY_FIELDS) {
+          if (parsed[key]) {
+            hasAny = true;
+            const row = document.createElement('div');
+            row.className = 'daily-row';
+            row.innerHTML = `<span class="daily-row-label">${esc(label)}：</span><span>${esc(parsed[key])}</span>`;
+            rows.appendChild(row);
+          }
+        }
+        if (!hasAny) {
+          const raw = document.createElement('div');
+          raw.style.cssText = 'font-size:0.82rem;line-height:1.7;white-space:pre-wrap;color:var(--text)';
+          raw.textContent = entry.text;
+          rows.appendChild(raw);
+        }
+      } catch (e) {
+        meta.textContent = `加载失败: ${e.message}`;
+      }
+    }
+
+    function parseDailyAnalysis(text) {
+      if (!text) return {};
+      const result = {};
+      const keys = ['市场概述', '主要主题', '利好资产', '利空资产', '核心驱动', '明日关注', '风险提示'];
+      const lines = text.split('\n');
+      let currentKey = null;
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        let matched = false;
+        for (const k of keys) {
+          if (trimmed.startsWith(k + '：') || trimmed.startsWith(k + ':')) {
+            currentKey = k;
+            result[k] = trimmed.slice(k.length + 1).trim();
+            matched = true;
+            break;
+          }
+        }
+        if (!matched && currentKey && currentKey in result) {
+          result[currentKey] += ' ' + trimmed;
+        }
+      }
+      return result;
+    }
+
+    async function triggerDailyAnalysis() {
+      const btn = document.getElementById('daily-trigger-btn');
+      btn.disabled = true;
+      btn.textContent = '生成中…';
+      try {
+        const res = await fetch('/api/daily-analysis/trigger', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+        const d = await res.json();
+        document.getElementById('daily-meta').textContent = d.message || '已触发，请稍后刷新';
+      } catch (e) {
+        document.getElementById('daily-meta').textContent = `触发失败: ${e.message}`;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '🤖 生成今日分析';
+      }
+    }
   </script>
 </body>
 </html>

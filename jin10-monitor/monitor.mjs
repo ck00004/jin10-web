@@ -15,30 +15,49 @@ const LOCK_FILE = join(__dirname, '.lock');
 const DEDUP_FILE = join(__dirname, 'dedup.json');
 const STATE_FILE = join(__dirname, 'state.json');
 const NEWS_FILE  = join(__dirname, 'news.json');
+const DAILY_FILE = join(__dirname, 'daily_analysis.json');
 
 // 配置
 const JIN10_URL = 'https://www.jin10.com/';
 const POLL_MS = 60_000;
 const DEDUP_HOURS = 72;
 
-// 从 config.json 读取配置
-const cfg = existsSync(join(__dirname, 'config.json')) 
-  ? JSON.parse(readFileSync(join(__dirname, 'config.json'), 'utf-8')) : {};
+// 动态配置（支持 Web 界面热更新，修改后无需重启即可生效；端口变更需重启）
+function loadConfigFile() {
+  if (!existsSync(join(__dirname, 'config.json'))) return {};
+  try { return JSON.parse(readFileSync(join(__dirname, 'config.json'), 'utf-8')); } catch (e) {
+    console.error(`[config] config.json parse error: ${e.message}`);
+    return {};
+  }
+}
+function saveConfigFile(newCfg) {
+  writeFileSync(join(__dirname, 'config.json'), JSON.stringify(newCfg, null, 2));
+}
+let cfg = loadConfigFile();
 const HTTP_PORT = cfg.WEB_PORT || 3000;
 
 // AI 提供商配置（支持 minimax / openai / gemini / claude）
-// 新格式：AI_PROVIDERS 数组；旧格式：MINIMAX_API_KEY（向后兼容）
-function loadAiProviders() {
-  const providers = Array.isArray(cfg.AI_PROVIDERS)
-    ? cfg.AI_PROVIDERS.filter(p => p && p.type && p.apiKey)
+// 新格式：AI_PROVIDERS 数组，每项支持 type/apiKey/model/baseUrl；旧格式：MINIMAX_API_KEY（向后兼容）
+function loadAiProviders(config) {
+  const c = config || {};
+  const providers = Array.isArray(c.AI_PROVIDERS)
+    ? c.AI_PROVIDERS.filter(p => p && p.type && p.apiKey)
     : [];
   // 向后兼容：MINIMAX_API_KEY 仍可用，自动置于列表首位
-  if (cfg.MINIMAX_API_KEY && !providers.some(p => p.type === 'minimax')) {
-    providers.unshift({ type: 'minimax', apiKey: cfg.MINIMAX_API_KEY });
+  if (c.MINIMAX_API_KEY && !providers.some(p => p.type === 'minimax')) {
+    providers.unshift({ type: 'minimax', apiKey: c.MINIMAX_API_KEY });
   }
   return providers;
 }
-const AI_PROVIDERS = loadAiProviders();
+let AI_PROVIDERS = loadAiProviders(cfg);
+
+// 热重载配置（Web 界面修改后立即生效，端口变更需重启）
+function reloadConfig() {
+  cfg = loadConfigFile();
+  AI_PROVIDERS = loadAiProviders(cfg);
+  log(`🔄 配置已重新加载，${AI_PROVIDERS.length} 个 AI 提供商`);
+  return cfg;
+}
 
 // 工具函数
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -316,12 +335,18 @@ async function buildTechnicalSummary(analysisText) {
 
 // 各 AI 提供商调用函数
 
-async function callMinimax(apiKey, model, prompt, timeoutMs) {
+// 构建 API 端点：优先使用 baseUrl，否则使用默认地址
+function buildEndpoint(baseUrl, defaultBase, path) {
+  const base = baseUrl ? baseUrl.replace(/\/+$/, '') : defaultBase;
+  return `${base}${path}`;
+}
+
+async function callMinimax(apiKey, model, prompt, timeoutMs, baseUrl) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  const endpoint = buildEndpoint(baseUrl, 'https://api.minimaxi.com/anthropic/v1', '/messages');
   try {
-    // MiniMax 提供 Anthropic 兼容接口（路径含 /anthropic/ 但实为 MiniMax 平台）
-    const r = await fetch('https://api.minimaxi.com/anthropic/v1/messages', {
+    const r = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
       body: JSON.stringify({ model: model || 'MiniMax-M2.5', max_tokens: 1024, messages: [{ role: 'user', content: prompt }] }),
@@ -338,11 +363,12 @@ async function callMinimax(apiKey, model, prompt, timeoutMs) {
   }
 }
 
-async function callOpenai(apiKey, model, prompt, timeoutMs) {
+async function callOpenai(apiKey, model, prompt, timeoutMs, baseUrl) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  const endpoint = buildEndpoint(baseUrl, 'https://api.openai.com/v1', '/chat/completions');
   try {
-    const r = await fetch('https://api.openai.com/v1/chat/completions', {
+    const r = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
       body: JSON.stringify({ model: model || 'gpt-4o', max_tokens: 1024, messages: [{ role: 'user', content: prompt }] }),
@@ -357,13 +383,14 @@ async function callOpenai(apiKey, model, prompt, timeoutMs) {
   }
 }
 
-async function callGemini(apiKey, model, prompt, timeoutMs) {
+async function callGemini(apiKey, model, prompt, timeoutMs, baseUrl) {
   const m = model || 'gemini-1.5-pro';
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  const base = buildEndpoint(baseUrl, 'https://generativelanguage.googleapis.com/v1beta', '');
   try {
     const r = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(m)}:generateContent?key=${apiKey}`,
+      `${base}/models/${encodeURIComponent(m)}:generateContent?key=${apiKey}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -380,11 +407,12 @@ async function callGemini(apiKey, model, prompt, timeoutMs) {
   }
 }
 
-async function callClaude(apiKey, model, prompt, timeoutMs) {
+async function callClaude(apiKey, model, prompt, timeoutMs, baseUrl) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  const endpoint = buildEndpoint(baseUrl, 'https://api.anthropic.com/v1', '/messages');
   try {
-    const r = await fetch('https://api.anthropic.com/v1/messages', {
+    const r = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
       body: JSON.stringify({ model: model || 'claude-3-5-sonnet-20241022', max_tokens: 1024, messages: [{ role: 'user', content: prompt }] }),
@@ -402,12 +430,12 @@ async function callClaude(apiKey, model, prompt, timeoutMs) {
 }
 
 async function callProvider(provider, prompt, timeoutMs) {
-  const { type, apiKey, model } = provider;
+  const { type, apiKey, model, baseUrl } = provider;
   switch (type) {
-    case 'minimax': return callMinimax(apiKey, model, prompt, timeoutMs);
-    case 'openai':  return callOpenai(apiKey, model, prompt, timeoutMs);
-    case 'gemini':  return callGemini(apiKey, model, prompt, timeoutMs);
-    case 'claude':  return callClaude(apiKey, model, prompt, timeoutMs);
+    case 'minimax': return callMinimax(apiKey, model, prompt, timeoutMs, baseUrl);
+    case 'openai':  return callOpenai(apiKey, model, prompt, timeoutMs, baseUrl);
+    case 'gemini':  return callGemini(apiKey, model, prompt, timeoutMs, baseUrl);
+    case 'claude':  return callClaude(apiKey, model, prompt, timeoutMs, baseUrl);
     default: throw new Error(`unknown provider type: ${type}`);
   }
 }
@@ -488,6 +516,100 @@ async function analyze(item, state) {
   return null;
 }
 
+// 每日新闻综合分析
+function loadDailyAnalyses() {
+  if (!existsSync(DAILY_FILE)) return {};
+  try { return JSON.parse(readFileSync(DAILY_FILE, 'utf-8')); } catch { return {}; }
+}
+
+function saveDailyAnalysis(date, entry) {
+  const all = loadDailyAnalyses();
+  all[date] = entry;
+  writeFileSync(DAILY_FILE, JSON.stringify(all, null, 2));
+}
+
+function getDateStr(epochMs) {
+  return new Date(epochMs || Date.now()).toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
+}
+
+function getTodayDateStr() { return getDateStr(Date.now()); }
+
+function getDayNewsItems(dateStr) {
+  return loadNews().filter(item => getDateStr(item.createdAt) === dateStr);
+}
+
+async function generateDailyReport(dateStr) {
+  const items = getDayNewsItems(dateStr);
+  if (items.length === 0) {
+    log(`📅 每日分析（${dateStr}）：当日无新闻数据`);
+    return null;
+  }
+  if (AI_PROVIDERS.length === 0) {
+    logErr('每日分析：未配置任何 AI 提供商');
+    return null;
+  }
+
+  const newsList = items.slice().reverse()
+    .map((item, i) => {
+      const t = item.time || new Date(item.createdAt).toLocaleTimeString('zh-CN', {
+        timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit',
+      });
+      return `${i + 1}. [${t}] ${item.title ? item.title + ' ' : ''}${item.content}`;
+    })
+    .join('\n');
+
+  const prompt = `你是一名专业的金融市场分析师。以下是${dateStr}全天的重要财经快讯（共 ${items.length} 条），请对这些新闻进行全面的每日综合分析报告。
+
+新闻列表：
+${newsList}
+
+请严格按以下格式输出（每项独立一行，字段名后接"："）：
+市场概述：3-5句话总结今日整体市场情况与重大事件
+主要主题：今日最重要的3-5个市场主题（分号分隔）
+利好资产：受利好影响的主要交易标的及简要原因（逗号分隔）
+利空资产：受利空影响的主要交易标的及简要原因（逗号分隔）
+核心驱动：一句话点名今日最核心的市场定价因子
+明日关注：明日需重点关注的事件、数据或价格关口（分号分隔）
+风险提示：今日暴露的1-2条主要市场风险`;
+
+  const timeouts = [60_000, 90_000];
+  for (const timeoutMs of timeouts) {
+    for (const provider of AI_PROVIDERS) {
+      try {
+        const res = await callProvider(provider, prompt, timeoutMs);
+        if (!res?.text) throw new Error('empty response');
+        log(`📅 每日分析 (${res.source}): ${dateStr} 生成成功，共 ${items.length} 条新闻`);
+        return { text: res.text, source: res.source, generatedAt: Date.now(), newsCount: items.length };
+      } catch (e) {
+        logErr(`每日分析 (${provider.type}): ${e.message}`);
+        await sleep(500);
+      }
+    }
+  }
+  logErr(`每日分析 (${dateStr}): 全部提供商均失败`);
+  return null;
+}
+
+// 解析 HTTP 请求体（JSON）
+function readRequestBody(req, res) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    req.on('data', chunk => {
+      body += chunk;
+      if (body.length > 1_000_000) {
+        if (!res.headersSent) {
+          res.writeHead(413, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: 'Request body too large' }));
+        }
+        req.destroy();
+        reject(new Error('Request body too large'));
+      }
+    });
+    req.on('end', () => { try { resolve(JSON.parse(body || '{}')); } catch { reject(new Error('invalid JSON')); } });
+    req.on('error', reject);
+  });
+}
+
 // 抓取逻辑
 const SCRAPE_EVAL = () => {
   const out = [];
@@ -543,65 +665,125 @@ function startWebServer() {
     '.svg':  'image/svg+xml',
   };
 
-  const server = createServer((req, res) => {
-    const url = new URL(req.url, `http://localhost:${HTTP_PORT}`);
-    const pathname = url.pathname;
+  const server = createServer(async (req, res) => {
+    try {
+      const url = new URL(req.url, `http://localhost:${HTTP_PORT}`);
+      const pathname = url.pathname;
 
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-    if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+      if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
 
-    // ── API routes ──────────────────────────────────────────────────────────
-    if (pathname === '/api/health') {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ok: true, time: new Date().toISOString() }));
-      return;
-    }
-
-    if (pathname === '/api/status') {
-      const state = loadState();
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ok: true, ...state }));
-      return;
-    }
-
-    if (pathname === '/api/news') {
-      const limit  = Math.min(parseInt(url.searchParams.get('limit')  || '20', 10), 100);
-      const before = parseInt(url.searchParams.get('before') || '0', 10);
-      const items  = loadNews();
-      const pool   = before > 0 ? items.filter(n => n.createdAt < before) : items;
-      const page   = pool.slice(0, limit);
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ok: true, items: page, total: items.length, hasMore: pool.length > limit }));
-      return;
-    }
-
-    // ── Static files ─────────────────────────────────────────────────────────
-    const filePath = pathname === '/' ? '/index.html' : pathname;
-    const fullPath = resolve(publicDir, '.' + filePath);
-    const ext = extname(fullPath);
-
-    // Prevent path traversal: resolved path must stay inside publicDir
-    if (!fullPath.startsWith(publicDir + '/') && fullPath !== publicDir) {
-      res.writeHead(403, { 'Content-Type': 'text/plain' });
-      res.end('Forbidden');
-      return;
-    }
-
-    if (existsSync(fullPath)) {
-      try {
-        const data = readFileSync(fullPath);
-        res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
-        res.end(data);
-      } catch (e) {
-        res.writeHead(500, { 'Content-Type': 'text/plain' });
-        res.end('Internal Server Error');
+      // ── API routes ──────────────────────────────────────────────────────────
+      if (pathname === '/api/health') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, time: new Date().toISOString() }));
+        return;
       }
-    } else {
-      res.writeHead(404, { 'Content-Type': 'text/plain' });
-      res.end('Not Found');
+
+      if (pathname === '/api/status') {
+        const state = loadState();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, ...state }));
+        return;
+      }
+
+      if (pathname === '/api/news') {
+        const limit  = Math.min(parseInt(url.searchParams.get('limit')  || '20', 10), 100);
+        const before = parseInt(url.searchParams.get('before') || '0', 10);
+        const items  = loadNews();
+        const pool   = before > 0 ? items.filter(n => n.createdAt < before) : items;
+        const page   = pool.slice(0, limit);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, items: page, total: items.length, hasMore: pool.length > limit }));
+        return;
+      }
+
+      // ── Config API ────────────────────────────────────────────────────────
+      if (pathname === '/api/config' && req.method === 'GET') {
+        const current = loadConfigFile();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, config: current }));
+        return;
+      }
+
+      if (pathname === '/api/config' && req.method === 'POST') {
+        let body;
+        try { body = await readRequestBody(req, res); } catch (e) {
+          if (!res.headersSent) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: false, error: e.message }));
+          }
+          return;
+        }
+        // Validate structure
+        if (body.AI_PROVIDERS !== undefined && !Array.isArray(body.AI_PROVIDERS)) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: 'AI_PROVIDERS must be an array' }));
+          return;
+        }
+        saveConfigFile(body);
+        reloadConfig();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, providers: AI_PROVIDERS.length }));
+        return;
+      }
+
+      // ── Daily Analysis API ────────────────────────────────────────────────
+      if (pathname === '/api/daily-analysis' && req.method === 'GET') {
+        const date = url.searchParams.get('date') || getTodayDateStr();
+        const all = loadDailyAnalyses();
+        const entry = all[date] || null;
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, date, analysis: entry }));
+        return;
+      }
+
+      if (pathname === '/api/daily-analysis/trigger' && req.method === 'POST') {
+        let body = {};
+        try { body = await readRequestBody(req, res); } catch {}
+        const date = body.date || getTodayDateStr();
+        // Run async - don't block the response
+        generateDailyReport(date).then(entry => {
+          if (entry) saveDailyAnalysis(date, entry);
+        }).catch(e => logErr(`每日分析触发: ${e.message}`));
+        res.writeHead(202, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, message: `正在生成 ${date} 的每日分析，请稍后刷新查看` }));
+        return;
+      }
+
+      // ── Static files ─────────────────────────────────────────────────────────
+      const filePath = pathname === '/' ? '/index.html' : pathname;
+      const fullPath = resolve(publicDir, '.' + filePath);
+      const ext = extname(fullPath);
+
+      // Prevent path traversal: resolved path must stay inside publicDir
+      if (!fullPath.startsWith(publicDir + '/') && fullPath !== publicDir) {
+        res.writeHead(403, { 'Content-Type': 'text/plain' });
+        res.end('Forbidden');
+        return;
+      }
+
+      if (existsSync(fullPath)) {
+        try {
+          const data = readFileSync(fullPath);
+          res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
+          res.end(data);
+        } catch (e) {
+          res.writeHead(500, { 'Content-Type': 'text/plain' });
+          res.end('Internal Server Error');
+        }
+      } else {
+        res.writeHead(404, { 'Content-Type': 'text/plain' });
+        res.end('Not Found');
+      }
+    } catch (e) {
+      if (!res.headersSent) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: e.message }));
+      }
     }
   });
 
@@ -721,6 +903,21 @@ async function main() {
       state.consecutiveFail = 0;
       state.lastSuccessAt = Date.now();
       saveState(state);
+
+      // 每日分析自动触发：每天 23:30 后自动生成（若当天尚未生成）
+      const nowHour = parseInt(
+        new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour: 'numeric', hour12: false }),
+        10
+      );
+      if (nowHour >= 23) {
+        const today = getTodayDateStr();
+        const dailyAll = loadDailyAnalyses();
+        if (!dailyAll[today]) {
+          log('📅 触发每日自动分析...');
+          const entry = await generateDailyReport(today);
+          if (entry) saveDailyAnalysis(today, entry);
+        }
+      }
 
     } catch (e) {
       logErr(`loop: ${e.message}`);
