@@ -249,6 +249,27 @@
       header h1 { font-size: 1rem; }
     }
 
+    /* ── Card actions ────────────────────────────────────────── */
+    .card-actions {
+      margin-top: 10px;
+      display: flex;
+      gap: 8px;
+    }
+
+    .reanalyze-btn {
+      padding: 4px 12px;
+      background: var(--surface2);
+      color: var(--text-muted);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.72rem;
+      font-family: inherit;
+      transition: background 0.2s, color 0.2s;
+    }
+    .reanalyze-btn:hover { background: rgba(59,130,246,0.15); color: var(--text); }
+    .reanalyze-btn:disabled { opacity: 0.5; cursor: default; }
+
     /* ── Daily Analysis Panel ────────────────────────────────── */
     #daily-panel {
       display: none;
@@ -485,6 +506,16 @@
         card.appendChild(noAi);
       }
 
+      // Card actions
+      const actions = document.createElement('div');
+      actions.className = 'card-actions';
+      const reanalyzeBtn = document.createElement('button');
+      reanalyzeBtn.className = 'reanalyze-btn';
+      reanalyzeBtn.textContent = '🔄 重新AI分析';
+      reanalyzeBtn.onclick = () => reanalyzeNews(item.id);
+      actions.appendChild(reanalyzeBtn);
+      card.appendChild(actions);
+
       return card;
     }
 
@@ -638,6 +669,57 @@
 
     function fmtTime(d) {
       return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    }
+
+    // ── Re-analyze ─────────────────────────────────────────────────────────
+    async function reanalyzeNews(id) {
+      const card = document.querySelector(`.card[data-id="${CSS.escape(id)}"]`);
+      const btn = card?.querySelector('.reanalyze-btn');
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = '分析中…';
+      }
+      try {
+        const res = await fetch('/api/news/reanalyze', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id }),
+        });
+        const d = await res.json();
+        if (!d.ok) throw new Error(d.error || '分析失败');
+
+        if (card) {
+          // Remove old AI block
+          const oldBlock = card.querySelector('.ai-block');
+          if (oldBlock) oldBlock.remove();
+
+          // Insert new AI block before the actions div
+          const actions = card.querySelector('.card-actions');
+          if (d.analysis) {
+            const newBlock = buildAiBlock(d.analysis, d.analysisSource, d.technical);
+            card.insertBefore(newBlock, actions);
+          } else if (d.analysisError) {
+            const noAi = document.createElement('div');
+            noAi.className = 'ai-block';
+            noAi.innerHTML = `<div class="ai-no-analysis">🤖 AI 分析暂不可用：${esc(d.analysisError)}</div>`;
+            card.insertBefore(noAi, actions);
+          }
+        }
+
+        // Update local allItems cache
+        const idx = allItems.findIndex(n => n.id === id);
+        if (idx !== -1) {
+          const { analysis, analysisSource, analysisError, technical } = d;
+          allItems[idx] = { ...allItems[idx], analysis, analysisSource, analysisError, technical };
+        }
+      } catch (e) {
+        alert(`重新AI分析失败: ${e.message}`);
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = '🔄 重新AI分析';
+        }
+      }
     }
 
     // ── Start ──────────────────────────────────────────────────────────────
