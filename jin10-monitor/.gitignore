@@ -5,9 +5,13 @@ config.json
 .lock
 state.json
 dedup.json
+news.json
 
 # logs
 *.log
 stdout.log
 stderr.log
 errors.log
+
+# dependencies
+node_modules/

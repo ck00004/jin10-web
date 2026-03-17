@@ -6,13 +6,13 @@
 
 ## English
 
-A real-time financial news monitor for jin10.com with AI-powered analysis. Monitors red-flag important news and sends notifications via Telegram/Discord/WhatsApp.
+A real-time financial news monitor for jin10.com with AI-powered analysis. Monitors red-flag important news and saves them for web display.
 
 ### Features
 
 - 🔴 Real-time monitoring of jin10.com important financial news
 - 🤖 AI analysis (target, sentiment, detailed explanation)
-- 📱 Push notifications to Telegram/Discord/WhatsApp
+- 🌐 Built-in web server for news display
 - 🔄 Auto deduplication (72 hours)
 - 📊 Supports: US/China stocks, gold, oil, cryptocurrency, forex
 
@@ -30,24 +30,28 @@ Create `config.json`:
 
 ```json
 {
-  "TELEGRAM_BOT_TOKEN": "your-bot-token",
-  "TELEGRAM_CHAT_ID": "your-chat-id",
-  "MINIMAX_API_KEY": "your-api-key"
+  "AI_PROVIDERS": [
+    { "type": "minimax", "apiKey": "your-minimax-api-key", "model": "MiniMax-M2.5" },
+    { "type": "openai",  "apiKey": "your-openai-api-key",  "model": "gpt-4o" },
+    { "type": "gemini",  "apiKey": "your-gemini-api-key",  "model": "gemini-1.5-pro" },
+    { "type": "claude",  "apiKey": "your-claude-api-key",  "model": "claude-3-5-sonnet-20241022" }
+  ],
+  "WEB_PORT": 3000
 }
 ```
 
-#### Get Telegram Bot Token
-1. Open @BotFather on Telegram
-2. Send `/newbot` to create a bot
-3. Copy the token
+You only need to configure the AI providers you actually use. Providers are tried in order; the first successful response is used.
 
-#### Get Telegram Chat ID
-1. Open @userinfobot on Telegram
-2. Send any message
-3. Copy your Chat ID
+> **Legacy support:** `MINIMAX_API_KEY` is still accepted for backwards compatibility.
 
-#### Get MiniMax API Key
-Sign up at https://platform.minimaxi.com
+#### Supported AI Providers
+
+| type | API Endpoint | Sign up |
+|------|-------------|---------|
+| `minimax` | https://api.minimaxi.com | https://platform.minimaxi.com |
+| `openai`  | https://api.openai.com | https://platform.openai.com |
+| `gemini`  | https://generativelanguage.googleapis.com | https://aistudio.google.com |
+| `claude`  | https://api.anthropic.com | https://console.anthropic.com |
 
 ### Usage | 使用
 
@@ -88,30 +92,27 @@ echo '{}' > dedup.json
 | monitor.mjs | Main monitoring script |
 | config.json | Configuration (not in git) |
 | dedup.json | Deduplication cache |
+| news.json | Stored news items (for web display) |
 | errors.log | Error log |
 
 ### Troubleshooting | 故障排除
 
-**No notifications received:**
-- Check config.json is correct
-- Verify Bot Token has permissions
-- Check errors.log
-
 **AI analysis failed:**
-- Verify MINIMAX_API_KEY is correct
+- Verify your API key(s) in `config.json`
 - Check API quota
+- Check errors.log
 
 ---
 
 ## 中文
 
-金十数据红色新闻实时监控，带 AI 分析功能。监控重要财经快讯并通过 Telegram/Discord/WhatsApp 推送通知。
+金十数据红色新闻实时监控，带 AI 分析功能。监控重要财经快讯并通过内置 Web 页面展示。
 
 ### 功能
 
 - 🔴 实时监控金十财经红色快讯
 - 🤖 AI 分析（标的、判断、详细说明）
-- 📱 推送到 Telegram/Discord/WhatsApp
+- 🌐 内置 Web 服务器展示新闻
 - 🔄 自动去重（72小时）
 - 📊 支持：中美股市、黄金、原油、加密货币、外汇
 
@@ -129,24 +130,28 @@ git clone https://github.com/YOUR_USERNAME/jin10-monitor.git
 
 ```json
 {
-  "TELEGRAM_BOT_TOKEN": "你的机器人Token",
-  "TELEGRAM_CHAT_ID": "你的Chat ID",
-  "MINIMAX_API_KEY": "你的API密钥"
+  "AI_PROVIDERS": [
+    { "type": "minimax", "apiKey": "你的MiniMax API密钥", "model": "MiniMax-M2.5" },
+    { "type": "openai",  "apiKey": "你的OpenAI API密钥",  "model": "gpt-4o" },
+    { "type": "gemini",  "apiKey": "你的Gemini API密钥",  "model": "gemini-1.5-pro" },
+    { "type": "claude",  "apiKey": "你的Claude API密钥",  "model": "claude-3-5-sonnet-20241022" }
+  ],
+  "WEB_PORT": 3000
 }
 ```
 
-#### 获取 Telegram Bot Token
-1. 在 Telegram 打开 @BotFather
-2. 发送 `/newbot` 创建机器人
-3. 复制 Token
+只需配置你实际使用的 AI 提供商。系统会按顺序尝试，第一个成功的结果即被采用。
 
-#### 获取 Telegram Chat ID
-1. 在 Telegram 打开 @userinfobot
-2. 发送任意消息
-3. 复制你的 Chat ID
+> **向后兼容：** 仍支持直接配置 `MINIMAX_API_KEY`。
 
-#### 获取 MiniMax API Key
-在 https://platform.minimaxi.com 注册
+#### 支持的 AI 提供商
+
+| type | API Endpoint | 注册地址 |
+|------|-------------|---------|
+| `minimax` | https://api.minimaxi.com | https://platform.minimaxi.com |
+| `openai`  | https://api.openai.com | https://platform.openai.com |
+| `gemini`  | https://generativelanguage.googleapis.com | https://aistudio.google.com |
+| `claude`  | https://api.anthropic.com | https://console.anthropic.com |
 
 ### 使用
 
@@ -187,18 +192,15 @@ echo '{}' > dedup.json
 | monitor.mjs | 主监控脚本 |
 | config.json | 配置文件（不提交到 git） |
 | dedup.json | 去重缓存 |
+| news.json | 新闻存储（供 Web 展示） |
 | errors.log | 错误日志 |
 
 ### 故障排除
 
-**没有收到推送：**
-- 检查 config.json 配置是否正确
-- 验证 Bot Token 是否有权限
-- 查看 errors.log
-
 **AI 分析失败：**
-- 确认 MINIMAX_API_KEY 正确
+- 确认 `config.json` 中 API 密钥配置正确
 - 检查 API 配额
+- 查看 errors.log
 
 ---
 
