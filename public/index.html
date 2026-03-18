@@ -440,6 +440,77 @@
       overflow-wrap: break-word;
     }
 
+    /* ── Calendar ──────────────────────────────────────────── */
+    .calendar-nav {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    .calendar-nav-btn {
+      padding: 4px 10px;
+      background: var(--surface2);
+      color: var(--text-muted);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.78rem;
+      font-family: inherit;
+      transition: background 0.2s, color 0.2s;
+    }
+    .calendar-nav-btn:hover { background: rgba(59,130,246,0.15); color: var(--text); }
+    .calendar-month-label {
+      font-size: 0.88rem;
+      font-weight: 600;
+      color: var(--text);
+      min-width: 100px;
+      text-align: center;
+    }
+    .calendar-grid {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 4px;
+      margin-bottom: 12px;
+    }
+    .calendar-weekday {
+      font-size: 0.68rem;
+      color: var(--text-muted);
+      text-align: center;
+      padding: 4px 0;
+    }
+    .calendar-day {
+      text-align: center;
+      padding: 6px 4px;
+      font-size: 0.75rem;
+      border-radius: 6px;
+      cursor: default;
+      color: var(--text-muted);
+      transition: background 0.15s, color 0.15s;
+    }
+    .calendar-day.empty { visibility: hidden; }
+    .calendar-day.has-analysis {
+      background: rgba(59,130,246,0.12);
+      color: var(--accent);
+      cursor: pointer;
+      font-weight: 600;
+    }
+    .calendar-day.has-analysis:hover {
+      background: rgba(59,130,246,0.25);
+    }
+    .calendar-day.selected {
+      background: var(--accent);
+      color: #fff;
+    }
+    .calendar-day.today {
+      outline: 2px solid var(--accent);
+      outline-offset: -2px;
+    }
+    #daily-content {
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid var(--border);
+    }
+
     /* ── Toggle switch ─────────────────────────────────────── */
     .toggle-wrap {
       display: flex;
@@ -494,16 +565,25 @@
     </div>
   </header>
 
-  <!-- Daily Analysis Panel -->
+  <!-- Daily Analysis Panel (Calendar) -->
   <div id="daily-panel">
     <div id="daily-panel-inner">
       <h2>📅 每日新闻综合分析</h2>
-      <div id="daily-meta">加载中…</div>
-      <div id="daily-rows"></div>
-      <div id="daily-empty" style="display:none">今日暂无每日分析，可点击下方按钮生成</div>
-      <div class="daily-actions">
-        <button class="nav-btn" id="daily-trigger-btn" onclick="triggerDailyAnalysis()">🤖 生成今日分析</button>
-        <button class="nav-btn" onclick="loadDailyAnalysis()">🔄 刷新</button>
+      <div class="calendar-nav">
+        <button class="calendar-nav-btn" onclick="calendarPrev()">◀ 上月</button>
+        <span class="calendar-month-label" id="calendar-month-label"></span>
+        <button class="calendar-nav-btn" onclick="calendarNext()">下月 ▶</button>
+        <button class="calendar-nav-btn" onclick="calendarToday()">今天</button>
+      </div>
+      <div class="calendar-grid" id="calendar-grid"></div>
+      <div id="daily-content">
+        <div id="daily-meta">请选择日期查看分析</div>
+        <div id="daily-rows"></div>
+        <div id="daily-empty" style="display:none">该日暂无每日分析，可点击下方按钮生成</div>
+        <div class="daily-actions">
+          <button class="nav-btn" id="daily-trigger-btn" onclick="triggerDailyAnalysis()">🤖 生成当日分析</button>
+          <button class="nav-btn" onclick="loadDailyForSelected()">🔄 刷新</button>
+        </div>
       </div>
     </div>
   </div>
@@ -697,10 +777,10 @@
         card.appendChild(buildEditHistoryBlock(item.editHistory));
       }
 
-      // Skipped / deleted / non-important news: no AI block or actions
-      if (item.skipped || isDeleted || !isImportant) return card;
+      // Skipped / deleted news: no AI block or actions
+      if (item.skipped || isDeleted) return card;
 
-      // AI analysis block (only for important news)
+      // AI analysis block (for any news that has analysis)
       if (item.analysis) {
         card.appendChild(buildAiBlock(item.analysis, item.analysisSource, item.technical));
       } else if (item.analysisError) {
@@ -710,14 +790,32 @@
         card.appendChild(noAi);
       }
 
-      // Card actions (only for important news)
+      // Card actions
       const actions = document.createElement('div');
       actions.className = 'card-actions';
-      const reanalyzeBtn = document.createElement('button');
-      reanalyzeBtn.className = 'reanalyze-btn';
-      reanalyzeBtn.textContent = '🔄 重新AI分析';
-      reanalyzeBtn.onclick = () => reanalyzeNews(item.id);
-      actions.appendChild(reanalyzeBtn);
+      if (isImportant) {
+        // 重要新闻：重新分析按钮
+        const reanalyzeBtn = document.createElement('button');
+        reanalyzeBtn.className = 'reanalyze-btn';
+        reanalyzeBtn.textContent = '🔄 重新AI分析';
+        reanalyzeBtn.onclick = () => reanalyzeNews(item.id);
+        actions.appendChild(reanalyzeBtn);
+      } else {
+        // 非重要新闻：按需 AI 分析按钮
+        if (item.analysis) {
+          const reanalyzeBtn = document.createElement('button');
+          reanalyzeBtn.className = 'reanalyze-btn';
+          reanalyzeBtn.textContent = '🔄 重新AI分析';
+          reanalyzeBtn.onclick = () => reanalyzeNews(item.id);
+          actions.appendChild(reanalyzeBtn);
+        } else {
+          const analyzeBtn = document.createElement('button');
+          analyzeBtn.className = 'reanalyze-btn';
+          analyzeBtn.textContent = '🤖 AI分析';
+          analyzeBtn.onclick = () => reanalyzeNews(item.id);
+          actions.appendChild(analyzeBtn);
+        }
+      }
       card.appendChild(actions);
 
       return card;
@@ -969,20 +1067,119 @@
       }
     }
 
+    // Alias for non-important news — same endpoint, same logic
+    const analyzeNews = reanalyzeNews;
+
     // ── Start ──────────────────────────────────────────────────────────────
     init();
 
-    // ── Daily Analysis ─────────────────────────────────────────────────────
+    // ── Daily Analysis (Calendar) ───────────────────────────────────────────
     let dailyPanelVisible = false;
+    let calendarYear = new Date().getFullYear();
+    let calendarMonth = new Date().getMonth(); // 0-indexed
+    let calendarDatesWithAnalysis = new Set();
+    let selectedDate = '';
 
     function toggleDailyPanel() {
       dailyPanelVisible = !dailyPanelVisible;
       const panel = document.getElementById('daily-panel');
       panel.classList.toggle('visible', dailyPanelVisible);
-      if (dailyPanelVisible) loadDailyAnalysis();
+      if (dailyPanelVisible) {
+        loadCalendarDates().then(() => renderCalendar());
+      }
     }
 
-    async function loadDailyAnalysis() {
+    async function loadCalendarDates() {
+      try {
+        const res = await fetch('/api/daily-analysis/dates');
+        const d = await res.json();
+        if (d.ok) {
+          calendarDatesWithAnalysis = new Set(d.dates);
+        }
+      } catch {}
+    }
+
+    function getTodayStr() {
+      return new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
+    }
+
+    function renderCalendar() {
+      const grid = document.getElementById('calendar-grid');
+      const label = document.getElementById('calendar-month-label');
+      grid.innerHTML = '';
+      label.textContent = `${calendarYear} 年 ${calendarMonth + 1} 月`;
+
+      const todayStr = getTodayStr();
+      const weekdays = ['日', '一', '二', '三', '四', '五', '六'];
+      for (const wd of weekdays) {
+        const el = document.createElement('div');
+        el.className = 'calendar-weekday';
+        el.textContent = wd;
+        grid.appendChild(el);
+      }
+
+      const firstDay = new Date(calendarYear, calendarMonth, 1).getDay();
+      const daysInMonth = new Date(calendarYear, calendarMonth + 1, 0).getDate();
+
+      for (let i = 0; i < firstDay; i++) {
+        const el = document.createElement('div');
+        el.className = 'calendar-day empty';
+        grid.appendChild(el);
+      }
+
+      for (let d = 1; d <= daysInMonth; d++) {
+        const dateStr = `${calendarYear}-${String(calendarMonth + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+        const el = document.createElement('div');
+        el.className = 'calendar-day';
+        el.textContent = d;
+
+        if (dateStr === todayStr) el.classList.add('today');
+        if (calendarDatesWithAnalysis.has(dateStr)) {
+          el.classList.add('has-analysis');
+        }
+        if (dateStr === selectedDate) el.classList.add('selected');
+
+        el.addEventListener('click', () => {
+          selectedDate = dateStr;
+          renderCalendar();
+          loadDailyForDate(dateStr);
+        });
+
+        grid.appendChild(el);
+      }
+    }
+
+    function calendarPrev() {
+      calendarMonth--;
+      if (calendarMonth < 0) { calendarMonth = 11; calendarYear--; }
+      renderCalendar();
+    }
+
+    function calendarNext() {
+      calendarMonth++;
+      if (calendarMonth > 11) { calendarMonth = 0; calendarYear++; }
+      renderCalendar();
+    }
+
+    function calendarToday() {
+      const now = new Date();
+      calendarYear = now.getFullYear();
+      calendarMonth = now.getMonth();
+      selectedDate = getTodayStr();
+      renderCalendar();
+      loadDailyForDate(selectedDate);
+    }
+
+    function loadDailyForSelected() {
+      if (selectedDate) {
+        loadCalendarDates().then(() => {
+          renderCalendar();
+          loadDailyForDate(selectedDate);
+        });
+      }
+    }
+
+    async function loadDailyForDate(dateStr) {
       const meta = document.getElementById('daily-meta');
       const rows = document.getElementById('daily-rows');
       const empty = document.getElementById('daily-empty');
@@ -990,7 +1187,7 @@
       rows.innerHTML = '';
       empty.style.display = 'none';
       try {
-        const res = await fetch('/api/daily-analysis');
+        const res = await fetch(`/api/daily-analysis?date=${encodeURIComponent(dateStr)}`);
         const d = await res.json();
         if (!d.ok) throw new Error('API error');
         const entry = d.analysis;
@@ -1059,18 +1256,23 @@
     }
 
     async function triggerDailyAnalysis() {
+      const date = selectedDate || getTodayStr();
       const btn = document.getElementById('daily-trigger-btn');
       btn.disabled = true;
       btn.textContent = '生成中…';
       try {
-        const res = await fetch('/api/daily-analysis/trigger', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+        const res = await fetch('/api/daily-analysis/trigger', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ date }),
+        });
         const d = await res.json();
         document.getElementById('daily-meta').textContent = d.message || '已触发，请稍后刷新';
       } catch (e) {
         document.getElementById('daily-meta').textContent = `触发失败: ${e.message}`;
       } finally {
         btn.disabled = false;
-        btn.textContent = '🤖 生成今日分析';
+        btn.textContent = '🤖 生成当日分析';
       }
     }
   </script>
