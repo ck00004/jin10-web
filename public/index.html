@@ -360,6 +360,108 @@
       opacity: 0.6;
       margin-left: 6px;
     }
+
+    /* ── Tags & Remarks ────────────────────────────────────── */
+    .card-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin-bottom: 4px;
+    }
+    .tag-badge {
+      display: inline-block;
+      font-size: 0.62rem;
+      font-weight: 600;
+      padding: 1px 6px;
+      border-radius: 3px;
+      vertical-align: middle;
+    }
+    .tag-vip { background: rgba(168,85,247,0.18); color: #a855f7; }
+    .tag-ad { background: rgba(148,163,184,0.12); color: var(--text-muted); }
+    .tag-live { background: rgba(34,197,94,0.15); color: #22c55e; }
+    .tag-elite { background: rgba(6,182,212,0.15); color: #06b6d4; }
+    .tag-default { background: rgba(148,163,184,0.12); color: var(--text-muted); }
+    .hot-badge {
+      display: inline-block;
+      font-size: 0.62rem;
+      font-weight: 700;
+      padding: 1px 6px;
+      border-radius: 3px;
+    }
+    .hot-爆, .hot-沸 { background: rgba(239,68,68,0.18); color: var(--bear); }
+    .hot-热, .hot-火 { background: rgba(245,158,11,0.18); color: #f59e0b; }
+    .card-source {
+      font-size: 0.68rem;
+      color: var(--text-muted);
+      margin-left: 6px;
+    }
+    .card-affect {
+      display: inline-block;
+      font-size: 0.7rem;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 4px;
+      margin-top: 4px;
+    }
+    .affect-bull { background: rgba(239,68,68,0.15); color: var(--bear); }
+    .affect-bear { background: rgba(34,197,94,0.15); color: #22c55e; }
+    .affect-neutral { background: rgba(148,163,184,0.1); color: var(--text-muted); }
+    .card-vip-info {
+      margin-top: 4px;
+      padding: 6px 8px;
+      background: rgba(168,85,247,0.08);
+      border-radius: 6px;
+      font-size: 0.78rem;
+    }
+    .card-vip-title { color: #a855f7; font-weight: 600; }
+    .card-vip-desc { color: var(--text-muted); margin-top: 2px; }
+    .card-link {
+      font-size: 0.72rem;
+      color: var(--accent);
+      word-break: break-all;
+      margin-top: 2px;
+    }
+    .card-remarks {
+      margin-top: 6px;
+      padding: 6px 8px;
+      background: var(--surface2);
+      border-radius: 6px;
+      font-size: 0.75rem;
+    }
+    .remark-item {
+      display: flex;
+      align-items: baseline;
+      gap: 6px;
+      padding: 2px 0;
+    }
+    .remark-type {
+      font-size: 0.65rem;
+      font-weight: 600;
+      padding: 1px 5px;
+      border-radius: 3px;
+      flex-shrink: 0;
+    }
+    .remark-type-link { background: rgba(148,163,184,0.12); color: var(--text-muted); }
+    .remark-type-topic { background: rgba(6,182,212,0.15); color: #06b6d4; }
+    .remark-type-quotes { background: rgba(245,158,11,0.15); color: #f59e0b; }
+    .remark-type-news { background: rgba(59,130,246,0.12); color: var(--accent); }
+    .remark-type-content { background: rgba(148,163,184,0.1); color: var(--text-muted); }
+    .remark-text { color: var(--text); word-break: break-all; }
+    .remark-link { color: var(--text-muted); font-size: 0.68rem; word-break: break-all; }
+    .remark-symbol { color: var(--text-muted); font-size: 0.68rem; }
+    .calendar-data {
+      margin-top: 4px;
+      padding: 6px 8px;
+      background: var(--surface2);
+      border-radius: 6px;
+      font-size: 0.78rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .calendar-data-item { color: var(--text-muted); }
+    .calendar-data-item strong { color: var(--text); font-weight: 600; }
+    .calendar-star { color: #f59e0b; letter-spacing: 1px; }
     .deleted-badge {
       display: inline-block;
       font-size: 0.65rem;
@@ -560,6 +662,10 @@
         <span class="toggle-switch"></span>
         <span>显示跳过</span>
       </label>
+      <label class="toggle-wrap" id="important-toggle" onclick="toggleImportantOnly()">
+        <span class="toggle-switch"></span>
+        <span>仅看重要</span>
+      </label>
       <a class="nav-btn" href="/config.html">⚙️ 配置</a>
       <button id="refresh-btn" onclick="refresh()">刷新</button>
     </div>
@@ -603,6 +709,7 @@
     let hasMore = false;
     let autoRefreshTimer = null;
     let showSkipped = false;
+    let importantOnly = false;
     const PAGE_SIZE = 20;
 
     function skippedParam() {
@@ -614,6 +721,29 @@
       document.getElementById('skipped-toggle').classList.toggle('active', showSkipped);
       // 重新加载全部新闻
       loadNews(true);
+    }
+
+    function toggleImportantOnly() {
+      importantOnly = !importantOnly;
+      document.getElementById('important-toggle').classList.toggle('active', importantOnly);
+      // 前端过滤，重新渲染已有数据
+      reRenderAll();
+    }
+
+    function reRenderAll() {
+      const filtered = importantOnly ? allItems.filter(n => n.important === true) : allItems;
+      const grid = document.getElementById('news-grid');
+      grid.innerHTML = '';
+      if (filtered.length === 0) {
+        grid.innerHTML = '<div id="loading" style="text-align:center;padding:60px 20px;color:var(--text-muted);grid-column:1/-1">暂无匹配的新闻数据</div>';
+      } else {
+        const fragment = document.createDocumentFragment();
+        for (const item of filtered) {
+          fragment.appendChild(buildCard(item));
+        }
+        grid.appendChild(fragment);
+      }
+      document.getElementById('load-more-wrap').style.display = hasMore ? 'block' : 'none';
     }
 
     // ── Bootstrap ──────────────────────────────────────────────────────────
@@ -755,8 +885,37 @@
       if (item.flashId) {
         timeHtml += `<span class="flash-id">ID: ${esc(item.flashId)}</span>`;
       }
+      if (item.source) {
+        timeHtml += `<span class="card-source">(${esc(item.source)})</span>`;
+      }
       timeEl.innerHTML = timeHtml;
       card.appendChild(timeEl);
+
+      // Tags + hot tag
+      const tags = Array.isArray(item.tags) ? item.tags : [];
+      const hotTag = item.hotTag || '';
+      if (tags.length > 0 || hotTag) {
+        const tagsEl = document.createElement('div');
+        tagsEl.className = 'card-tags';
+        for (const tag of tags) {
+          const span = document.createElement('span');
+          span.className = 'tag-badge';
+          if (tag === 'VIP' || tag === 'VIP·锁定') span.classList.add('tag-vip');
+          else if (tag === '广告') span.classList.add('tag-ad');
+          else if (tag === '直播') span.classList.add('tag-live');
+          else if (tag === '精英') span.classList.add('tag-elite');
+          else span.classList.add('tag-default');
+          span.textContent = tag;
+          tagsEl.appendChild(span);
+        }
+        if (hotTag) {
+          const span = document.createElement('span');
+          span.className = `hot-badge hot-${hotTag}`;
+          span.textContent = hotTag;
+          tagsEl.appendChild(span);
+        }
+        card.appendChild(tagsEl);
+      }
 
       // Title (optional)
       if (item.title) {
@@ -771,6 +930,86 @@
       contentEl.className = 'card-content';
       contentEl.textContent = item.content;
       card.appendChild(contentEl);
+
+      // Calendar data (for type=1 economic events)
+      if (item.calendarData) {
+        const cd = item.calendarData;
+        const calEl = document.createElement('div');
+        calEl.className = 'calendar-data';
+        const unit = cd.unit || '';
+        const fmtVal = (v) => {
+          if (v == null || v === '--') return '--';
+          const s = v === 0 ? '0' : String(v);
+          return unit === '%' ? s + '%' : s;
+        };
+        calEl.innerHTML = `<span class="calendar-data-item">前值: <strong>${esc(fmtVal(cd.previous))}</strong></span>`
+          + `<span class="calendar-data-item">预期: <strong>${esc(fmtVal(cd.forecast))}</strong></span>`
+          + `<span class="calendar-data-item">公布: <strong>${esc(fmtVal(cd.actual))}</strong></span>`;
+        if (cd.revised != null) {
+          calEl.innerHTML += `<span class="calendar-data-item">修正: <strong>${esc(fmtVal(cd.revised))}</strong></span>`;
+        }
+        if (typeof cd.star === 'number' && cd.star > 0) {
+          const stars = '★'.repeat(cd.star) + '☆'.repeat(Math.max(0, 5 - cd.star));
+          calEl.innerHTML += `<span class="calendar-star">${stars}</span>`;
+        }
+        card.appendChild(calEl);
+      }
+
+      // Affect (利好/利空)
+      if (item.affect) {
+        const affEl = document.createElement('div');
+        affEl.className = 'card-affect';
+        if (item.affect.includes('利多')) affEl.classList.add('affect-bull');
+        else if (item.affect.includes('利空')) affEl.classList.add('affect-bear');
+        else affEl.classList.add('affect-neutral');
+        affEl.textContent = item.affect;
+        card.appendChild(affEl);
+      }
+
+      // VIP info
+      if (item.vipTitle || item.vipDesc) {
+        const vipEl = document.createElement('div');
+        vipEl.className = 'card-vip-info';
+        if (item.vipTitle) {
+          vipEl.innerHTML += `<div class="card-vip-title">VIP: ${esc(item.vipTitle)}</div>`;
+        }
+        if (item.vipDesc) {
+          vipEl.innerHTML += `<div class="card-vip-desc">解读: ${esc(item.vipDesc)}</div>`;
+        }
+        card.appendChild(vipEl);
+      }
+
+      // Link
+      if (item.link) {
+        const linkEl = document.createElement('div');
+        linkEl.className = 'card-link';
+        linkEl.textContent = `链接: ${item.link}`;
+        card.appendChild(linkEl);
+      }
+
+      // Remarks (注解信息)
+      const remarks = Array.isArray(item.remarks) ? item.remarks : [];
+      if (remarks.length > 0) {
+        const rmBlock = document.createElement('div');
+        rmBlock.className = 'card-remarks';
+        for (const rm of remarks) {
+          const rmEl = document.createElement('div');
+          rmEl.className = 'remark-item';
+          const typeLabel = { link: '链接', topic: '话题', quotes: '行情', news: '新闻', content: '注解' };
+          const typeClass = `remark-type-${rm.type}`;
+          let html = `<span class="remark-type ${typeClass}">${esc(typeLabel[rm.type] || rm.type)}</span>`;
+          if (rm.type === 'content') {
+            html += `<span class="remark-text">${esc(rm.content || '')}</span>`;
+          } else {
+            html += `<span class="remark-text">${esc(rm.title || '')}</span>`;
+            if (rm.symbol) html += `<span class="remark-symbol">(${esc(rm.symbol)})</span>`;
+            if (rm.link) html += `<span class="remark-link">${esc(rm.link)}</span>`;
+          }
+          rmEl.innerHTML = html;
+          rmBlock.appendChild(rmEl);
+        }
+        card.appendChild(rmBlock);
+      }
 
       // Edit history
       if (Array.isArray(item.editHistory) && item.editHistory.length > 0) {

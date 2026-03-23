@@ -60,7 +60,10 @@ async function processFlashEvent(event, dedupRef, state) {
     saveDedup(dedupRef);
     appendNews({
       id: k, flashId: item.flashId, time: item.time, title: item.title, content: item.content,
-      important: false, createdAt: Date.now(),
+      important: false, tags: item.tags, hotTag: item.hotTag, remarks: item.remarks,
+      affect: item.affect, source: item.source, calendarData: item.calendarData,
+      vipTitle: item.vipTitle, vipDesc: item.vipDesc, link: item.link,
+      createdAt: Date.now(),
     });
     return;
   }
@@ -73,7 +76,9 @@ async function processFlashEvent(event, dedupRef, state) {
     dedupRef[k] = { ts: Date.now(), ad: true };
     saveDedup(dedupRef);
     appendNews({ id: k, flashId: item.flashId, time: item.time, title: item.title, content: item.content,
-      important: true, skipped: true, skipReason: '广告', createdAt: Date.now() });
+      important: true, skipped: true, skipReason: '广告',
+      tags: item.tags, hotTag: item.hotTag, remarks: item.remarks, affect: item.affect, source: item.source,
+      createdAt: Date.now() });
     return;
   }
 
@@ -83,7 +88,9 @@ async function processFlashEvent(event, dedupRef, state) {
     dedupRef[k] = { ts: Date.now(), click_to_view: true };
     saveDedup(dedupRef);
     appendNews({ id: k, flashId: item.flashId, time: item.time, title: item.title, content: item.content,
-      important: true, skipped: true, skipReason: '点击查看', createdAt: Date.now() });
+      important: true, skipped: true, skipReason: '点击查看',
+      tags: item.tags, hotTag: item.hotTag, remarks: item.remarks, affect: item.affect, source: item.source,
+      createdAt: Date.now() });
     return;
   }
 
@@ -93,7 +100,9 @@ async function processFlashEvent(event, dedupRef, state) {
     dedupRef[k] = { ts: Date.now(), calendar_preview: true };
     saveDedup(dedupRef);
     appendNews({ id: k, flashId: item.flashId, time: item.time, title: item.title, content: item.content,
-      important: true, skipped: true, skipReason: '日历/预告', createdAt: Date.now() });
+      important: true, skipped: true, skipReason: '日历/预告',
+      tags: item.tags, hotTag: item.hotTag, remarks: item.remarks, affect: item.affect, source: item.source,
+      createdAt: Date.now() });
     return;
   }
 
@@ -121,6 +130,9 @@ async function processFlashEvent(event, dedupRef, state) {
 
   appendNews({ id: k, flashId: item.flashId, time: item.time, title: item.title, content: item.content,
     important: true, analysis: analysisText, analysisSource, analysisError, technical,
+    tags: item.tags, hotTag: item.hotTag, remarks: item.remarks,
+    affect: item.affect, source: item.source, calendarData: item.calendarData,
+    vipTitle: item.vipTitle, vipDesc: item.vipDesc, link: item.link,
     createdAt: Date.now() });
 
   log(`  ✅ 已处理: ${item.time} (ID: ${item.flashId}) ${item.title?.substring(0,30) || item.content?.substring(0,30)}`);
