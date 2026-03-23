@@ -837,17 +837,22 @@
       const placeholder = document.getElementById('loading');
       if (placeholder) placeholder.remove();
 
+      // 统一过滤：仅看重要模式
+      const filtered = importantOnly ? items.filter(n => n.important === true) : items;
+
       // reset 模式：清空整个 grid 再重新渲染
       if (!append && !prepend) {
         grid.innerHTML = '';
-        if (items.length === 0) {
+        if (filtered.length === 0) {
           grid.innerHTML = '<div id="loading" style="text-align:center;padding:60px 20px;color:var(--text-muted);grid-column:1/-1">暂无新闻数据</div>';
           return;
         }
       }
 
+      if (filtered.length === 0) return;
+
       const fragment = document.createDocumentFragment();
-      for (const item of items) {
+      for (const item of filtered) {
         fragment.appendChild(buildCard(item));
       }
 
