@@ -445,7 +445,7 @@ function buildAiBlock(analysisText, source, technical) {
   // If we couldn't parse structured fields, show raw text
   if (!Object.values(parsed).some(Boolean)) {
     const raw = document.createElement('div');
-    raw.style.cssText = 'font-size:0.82rem;line-height:1.7;white-space:pre-wrap';
+    raw.className = 'ai-body-raw';
     raw.textContent = analysisText;
     body.appendChild(raw);
   }
@@ -725,7 +725,7 @@ async function loadDailyForDate(dateStr) {
     }
     if (!hasAny) {
       const raw = document.createElement('div');
-      raw.style.cssText = 'font-size:0.82rem;line-height:1.7;white-space:pre-wrap;color:var(--text)';
+      raw.className = 'daily-body-raw';
       raw.textContent = entry.text;
       rows.appendChild(raw);
     }
