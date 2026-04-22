@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>金十重要新闻 · AI 分析</title>
+  <link rel="stylesheet" href="/css/theme.css" />
+  <link rel="stylesheet" href="/css/news.css" />
+</head>
+<body>
+  <header class="app-header">
+    <h1>📡 金十重要新闻 · AI 分析</h1>
+    <div class="status-bar" id="status-bar">
+      <span class="status-dot" id="status-dot"></span>
+      <span id="status-text">加载中…</span>
+      <button class="btn btn-secondary" onclick="toggleDailyPanel()">📅 每日分析</button>
+      <label class="toggle-wrap" id="skipped-toggle" onclick="toggleSkipped()">
+        <span class="toggle-switch"></span>
+        <span>显示跳过</span>
+      </label>
+      <label class="toggle-wrap" id="important-toggle" onclick="toggleImportantOnly()">
+        <span class="toggle-switch"></span>
+        <span>仅看重要</span>
+      </label>
+      <a class="btn btn-secondary" href="/config.html">⚙️ 配置</a>
+      <button class="refresh-btn" id="refresh-btn" onclick="refresh()">🔄 刷新</button>
+    </div>
+  </header>
+
+  <!-- Daily Analysis Panel (Calendar) -->
+  <div class="daily-panel" id="daily-panel">
+    <div class="daily-panel-inner">
+      <h2>📅 每日新闻综合分析</h2>
+      <div class="calendar-nav">
+        <button class="btn btn-secondary" onclick="calendarPrev()">◀ 上月</button>
+        <span class="calendar-month-label" id="calendar-month-label"></span>
+        <button class="btn btn-secondary" onclick="calendarNext()">下月 ▶</button>
+        <button class="btn btn-secondary" onclick="calendarToday()">今天</button>
+      </div>
+      <div class="calendar-grid" id="calendar-grid"></div>
+      <div class="daily-content" id="daily-content">
+        <div class="daily-meta" id="daily-meta">请选择日期查看分析</div>
+        <div id="daily-rows"></div>
+        <div class="daily-empty" id="daily-empty" style="display:none">该日暂无每日分析，可点击下方按钮生成</div>
+        <div class="daily-actions">
+          <button class="btn btn-secondary" id="daily-trigger-btn" onclick="triggerDailyAnalysis()">🤖 生成当日分析</button>
+          <button class="btn btn-secondary" onclick="loadDailyForSelected()">🔄 刷新</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="news-grid" id="news-grid">
+    <div class="loading-placeholder">📡 正在加载新闻…</div>
+  </div>
+
+  <div class="load-more-wrap" id="load-more-wrap" style="display:none">
+    <button class="load-more-btn" id="load-more-btn" onclick="loadMore()">加载更多</button>
+  </div>
+
+  <button class="scroll-top-btn" id="scroll-top-btn" onclick="window.scrollTo({top:0,behavior:'smooth'})" title="回到顶部">↑</button>
+
+  <script type="module" src="/js/news.js"></script>
+</body>
+</html>

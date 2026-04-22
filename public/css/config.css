@@ -1,0 +1,179 @@
+/* ══════════════════════════════════════════════════════════════════
+   Jin10 Monitor — Config Page Styles
+   ══════════════════════════════════════════════════════════════════ */
+
+.config-container {
+  max-width: 880px;
+  margin: 28px auto;
+  padding: 0 20px 60px;
+}
+
+/* ── Form Row ───────────────────────────────────────────────────── */
+.form-row {
+  display: grid;
+  grid-template-columns: 7.5em 1fr;
+  gap: 8px 14px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.form-row label {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  text-align: right;
+  font-weight: 500;
+}
+.form-row input,
+.form-row select,
+.form-row textarea {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.88rem;
+  padding: 9px 14px;
+  outline: none;
+  transition: all 0.25s;
+  width: 100%;
+}
+.form-row input:focus,
+.form-row select:focus,
+.form-row textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(79, 143, 247, 0.12);
+}
+.form-row input::placeholder,
+.form-row textarea::placeholder {
+  color: var(--text-muted);
+  font-style: italic;
+}
+.form-row select {
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%237b869c' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 32px;
+}
+
+.form-hint {
+  grid-column: 2;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-top: -4px;
+}
+
+/* ── Toggle Row (inline toggle in form) ─────────────────────────── */
+.form-toggle-row {
+  display: grid;
+  grid-template-columns: 7.5em 1fr;
+  gap: 8px 14px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.form-toggle-row label {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  text-align: right;
+  font-weight: 500;
+}
+.form-toggle-control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.form-toggle-desc {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+/* ── Provider Card ──────────────────────────────────────────────── */
+.provider-card {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 18px 20px;
+  margin-bottom: 14px;
+  position: relative;
+  transition: border-color var(--transition);
+}
+.provider-card:hover { border-color: var(--border-light); }
+
+.provider-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.provider-num {
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: var(--accent);
+  background: var(--accent-dim);
+  padding: 3px 10px;
+  border-radius: var(--radius-sm);
+}
+.provider-type-badge {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  flex: 1;
+}
+
+/* ── Add Provider Button ────────────────────────────────────────── */
+.add-provider-btn {
+  width: 100%;
+  padding: 10px;
+  background: var(--accent-dim);
+  border: 1px dashed var(--accent);
+  border-radius: var(--radius-lg);
+  color: var(--accent);
+  font-size: 0.88rem;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all var(--transition);
+  margin-top: 6px;
+}
+.add-provider-btn:hover { background: rgba(79, 143, 247, 0.18); }
+
+/* ── Type Hints ─────────────────────────────────────────────────── */
+.type-hints {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-top: 18px;
+  line-height: 2;
+}
+.type-hints strong { color: var(--text-secondary); }
+.type-hints code {
+  background: var(--surface2);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.82rem;
+  color: var(--accent);
+}
+
+/* ── Action Bar ─────────────────────────────────────────────────── */
+.action-bar {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* ── Responsive ─────────────────────────────────────────────────── */
+@media (max-width: 600px) {
+  .form-row,
+  .form-toggle-row {
+    grid-template-columns: 1fr;
+  }
+  .form-row label,
+  .form-toggle-row label {
+    text-align: left;
+  }
+  .form-hint { grid-column: 1; }
+  .config-container {
+    padding: 0 14px 40px;
+    margin-top: 20px;
+  }
+  .section { padding: 18px; }
+}

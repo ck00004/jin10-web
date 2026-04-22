@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI 配置 · 金十监控</title>
+  <link rel="stylesheet" href="/css/theme.css" />
+  <link rel="stylesheet" href="/css/config.css" />
+</head>
+<body>
+  <header class="app-header">
+    <h1>⚙️ AI 配置</h1>
+    <a class="btn btn-secondary" href="/">← 返回新闻</a>
+  </header>
+
+  <div class="config-container">
+    <!-- AI Providers -->
+    <div class="section">
+      <div class="section-title">🤖 AI 提供商配置</div>
+      <div id="providers-list"></div>
+      <button class="add-provider-btn" onclick="addProvider()">＋ 添加 AI 提供商</button>
+
+      <div class="type-hints">
+        <strong>类型说明：</strong><br>
+        <strong>openai</strong> — OpenAI 官方或任何 OpenAI 兼容 API（本地 Ollama、One API、各类代理均可）<br>
+        <strong>claude</strong> — Anthropic Claude 官方或兼容接口<br>
+        <strong>gemini</strong> — Google Gemini 官方接口<br>
+        <strong>minimax</strong> — MiniMax 官方接口（Anthropic 兼容）<br><br>
+        <strong>远程地址（baseUrl）：</strong> 填写 API 的根路径（不含最后的斜杠），留空使用各提供商默认地址。<br>
+        例如：<code>https://api.openai.com/v1</code>、<code>http://localhost:11434/v1</code>（Ollama）、<code>https://your-proxy.example.com/v1</code>
+      </div>
+    </div>
+
+    <!-- Server Settings -->
+    <div class="section">
+      <div class="section-title">🌐 服务器设置</div>
+      <div class="form-row">
+        <label>Web 端口</label>
+        <input type="number" id="port-input" min="1" max="65535" placeholder="3000（默认）" />
+      </div>
+      <div class="form-row">
+        <span></span>
+        <span class="form-hint">修改端口后需要重启服务才能生效</span>
+      </div>
+      <div class="form-row">
+        <label>监听地址</label>
+        <input type="text" id="host-input" placeholder="0.0.0.0（默认，监听所有地址）" />
+      </div>
+      <div class="form-row">
+        <span></span>
+        <span class="form-hint">修改监听地址后需要重启服务才能生效，例如：127.0.0.1 仅本地访问</span>
+      </div>
+    </div>
+
+    <!-- Debug Settings -->
+    <div class="section">
+      <div class="section-title">🔧 调试设置</div>
+      <div class="form-toggle-row">
+        <label>AI 调试</label>
+        <div class="form-toggle-control">
+          <label class="toggle-wrap" id="debug-toggle" onclick="toggleDebug()">
+            <span class="toggle-switch"></span>
+            <span class="form-toggle-desc">开启后输出详细的 AI 请求日志（立即生效）</span>
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- Actions -->
+    <div class="action-bar">
+      <button class="btn btn-primary btn-lg" id="save-btn" onclick="saveConfig()">💾 保存配置</button>
+      <button class="btn btn-secondary" onclick="loadConfig()">↺ 重新加载</button>
+    </div>
+    <div class="toast" id="toast"></div>
+  </div>
+
+  <script type="module" src="/js/config.js"></script>
+</body>
+</html>

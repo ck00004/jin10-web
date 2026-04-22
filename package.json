@@ -1,0 +1,20 @@
+{
+  "name": "jin10-web",
+  "version": "2.0.0",
+  "description": "金十重要新闻监控 + AI 分析 + Web 展示页面",
+  "main": "monitor.mjs",
+  "type": "module",
+  "scripts": {
+    "start": "node monitor.mjs",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "@google/generative-ai": "^0.24.0",
+    "openai": "^4.85.0",
+    "ws": "^8.18.0"
+  }
+}
