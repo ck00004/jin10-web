@@ -7,7 +7,8 @@
 import { esc, showToast } from './utils.js';
 
 // ── State ────────────────────────────────────────────────────────────────────
-let providers = [];
+let newsProviders = [];
+let dailyProviders = [];
 let existingConfig = {}; // store the full config to merge on save
 
 /** Default models & base URLs — must match the server-side defaults */
@@ -30,7 +31,9 @@ async function loadConfig() {
     if (!d.ok) throw new Error('API error');
     const cfg = d.config || {};
     existingConfig = cfg;
-    providers = (cfg.AI_PROVIDERS || []).map(p => ({ ...p }));
+    const legacyProviders = (cfg.AI_PROVIDERS || []).map(p => ({ ...p }));
+    newsProviders = (cfg.NEWS_ANALYSIS_AI_PROVIDERS || legacyProviders).map(p => ({ ...p }));
+    dailyProviders = (cfg.DAILY_ANALYSIS_AI_PROVIDERS || legacyProviders).map(p => ({ ...p }));
     $('port-input').value = cfg.WEB_PORT || '';
     $('host-input').value = cfg.WEB_HOST || '';
     // AI Debug toggle
@@ -40,7 +43,8 @@ async function loadConfig() {
     } else {
       debugToggle.classList.remove('active');
     }
-    renderProviders();
+    renderProviders('news');
+    renderProviders('daily');
     showToast(toast(), 'ok', '配置已加载');
   } catch (e) {
     showToast(toast(), 'err', '加载失败：' + e.message);
@@ -50,25 +54,35 @@ async function loadConfig() {
 window.loadConfig = loadConfig;
 
 // ── Render provider cards ────────────────────────────────────────────────────
-function renderProviders() {
-  const list = $('providers-list');
+function getProvidersByKind(kind) {
+  return kind === 'daily' ? dailyProviders : newsProviders;
+}
+
+function getListId(kind) {
+  return kind === 'daily' ? 'daily-providers-list' : 'news-providers-list';
+}
+
+function renderProviders(kind) {
+  const providers = getProvidersByKind(kind);
+  const list = $(getListId(kind));
   list.innerHTML = '';
   if (providers.length === 0) {
     list.innerHTML = '<div style="font-size:0.82rem;color:var(--text-muted);margin-bottom:12px;">暂无 AI 提供商，点击下方按钮添加</div>';
     return;
   }
   providers.forEach((p, i) => {
+    const prefix = `${kind}-${i}`;
     const card = document.createElement('div');
     card.className = 'provider-card';
     card.innerHTML = `
       <div class="provider-header">
         <span class="provider-num">#${i + 1}</span>
-        <span class="provider-type-badge" id="badge-${i}">${p.type || '—'}</span>
-        <button class="btn btn-danger btn-sm" onclick="removeProvider(${i})">✕ 删除</button>
+        <span class="provider-type-badge" id="badge-${prefix}">${p.type || '—'}</span>
+        <button class="btn btn-danger btn-sm" onclick="removeProvider('${kind}', ${i})">✕ 删除</button>
       </div>
       <div class="form-row">
         <label>类型</label>
-        <select id="type-${i}" onchange="onTypeChange(${i})">
+        <select id="type-${prefix}" onchange="onTypeChange('${kind}', ${i})">
           <option value="openai"  ${p.type === 'openai'  ? 'selected' : ''}>openai</option>
           <option value="claude"  ${p.type === 'claude'  ? 'selected' : ''}>claude</option>
           <option value="gemini"  ${p.type === 'gemini'  ? 'selected' : ''}>gemini</option>
@@ -77,19 +91,19 @@ function renderProviders() {
       </div>
       <div class="form-row">
         <label>API Key</label>
-        <input type="password" id="key-${i}" value="${esc(p.apiKey || '')}" placeholder="必填" autocomplete="off" />
+        <input type="password" id="key-${prefix}" value="${esc(p.apiKey || '')}" placeholder="必填" autocomplete="off" />
       </div>
       <div class="form-row">
         <label>模型</label>
-        <input type="text" id="model-${i}" value="${esc(p.model || '')}" placeholder="留空使用默认：${(TYPE_DEFAULTS[p.type] || TYPE_DEFAULTS.openai).model}" />
+        <input type="text" id="model-${prefix}" value="${esc(p.model || '')}" placeholder="留空使用默认：${(TYPE_DEFAULTS[p.type] || TYPE_DEFAULTS.openai).model}" />
       </div>
       <div class="form-row">
         <label>远程地址</label>
-        <input type="url" id="baseurl-${i}" value="${esc(p.baseUrl || '')}" placeholder="留空使用官方默认地址" />
+        <input type="url" id="baseurl-${prefix}" value="${esc(p.baseUrl || '')}" placeholder="留空使用官方默认地址" />
       </div>
       <div class="form-row">
         <span></span>
-        <span class="form-hint">远程地址示例：<span id="hint-${i}">${getHint(p.type)}</span></span>
+        <span class="form-hint">远程地址示例：<span id="hint-${prefix}">${getHint(p.type)}</span></span>
       </div>
     `;
     list.appendChild(card);
@@ -100,26 +114,32 @@ function getHint(type) {
   return (TYPE_DEFAULTS[type] || TYPE_DEFAULTS.openai).baseUrl;
 }
 
-window.onTypeChange = function (i) {
-  const type = $(`type-${i}`).value;
-  $(`badge-${i}`).textContent = type;
-  $(`hint-${i}`).textContent = getHint(type);
-  const modelInput = $(`model-${i}`);
+window.onTypeChange = function (kind, i) {
+  const prefix = `${kind}-${i}`;
+  const type = $(`type-${prefix}`).value;
+  $(`badge-${prefix}`).textContent = type;
+  $(`hint-${prefix}`).textContent = getHint(type);
+  const modelInput = $(`model-${prefix}`);
   if (!modelInput.value) {
     modelInput.placeholder = `留空使用默认：${(TYPE_DEFAULTS[type] || {}).model || ''}`;
   }
 };
 
-window.addProvider = function () {
+function addProvider(kind) {
+  const providers = getProvidersByKind(kind);
   providers.push({ type: 'openai', apiKey: '', model: '', baseUrl: '' });
-  renderProviders();
-  const list = $('providers-list');
+  renderProviders(kind);
+  const list = $(getListId(kind));
   list.lastElementChild?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-};
+}
 
-window.removeProvider = function (i) {
+window.addNewsProvider = function () { addProvider('news'); };
+window.addDailyProvider = function () { addProvider('daily'); };
+
+window.removeProvider = function (kind, i) {
+  const providers = getProvidersByKind(kind);
   providers.splice(i, 1);
-  renderProviders();
+  renderProviders(kind);
 };
 
 window.toggleDebug = function () {
@@ -128,13 +148,15 @@ window.toggleDebug = function () {
 };
 
 // ── Collect provider data from DOM ───────────────────────────────────────────
-function collectProviders() {
+function collectProviders(kind) {
+  const providers = getProvidersByKind(kind);
   const result = [];
   for (let i = 0; i < providers.length; i++) {
-    const type    = $(`type-${i}`)?.value?.trim() || 'openai';
-    const apiKey  = $(`key-${i}`)?.value?.trim() || '';
-    const model   = $(`model-${i}`)?.value?.trim() || '';
-    const baseUrl = $(`baseurl-${i}`)?.value?.trim() || '';
+    const prefix = `${kind}-${i}`;
+    const type    = $(`type-${prefix}`)?.value?.trim() || 'openai';
+    const apiKey  = $(`key-${prefix}`)?.value?.trim() || '';
+    const model   = $(`model-${prefix}`)?.value?.trim() || '';
+    const baseUrl = $(`baseurl-${prefix}`)?.value?.trim() || '';
     if (!apiKey) continue;
     const p = { type, apiKey };
     if (model) p.model = model;
@@ -152,11 +174,14 @@ window.saveConfig = async function () {
     const port = parseInt($('port-input').value, 10);
     const host = $('host-input').value.trim();
     const aiDebug = $('debug-toggle').classList.contains('active');
-    const newProviders = collectProviders();
+    const nextNewsProviders = collectProviders('news');
+    const nextDailyProviders = collectProviders('daily');
 
     // Merge with existing config to preserve unknown fields
     const body = { ...existingConfig };
-    body.AI_PROVIDERS = newProviders;
+    body.NEWS_ANALYSIS_AI_PROVIDERS = nextNewsProviders;
+    body.DAILY_ANALYSIS_AI_PROVIDERS = nextDailyProviders;
+    delete body.AI_PROVIDERS;
     if (port >= 1 && port <= 65535) {
       body.WEB_PORT = port;
     } else {
@@ -181,7 +206,7 @@ window.saveConfig = async function () {
     const d = await res.json();
     if (!d.ok) throw new Error(d.error || 'save failed');
     existingConfig = body; // update local cache
-    showToast(toast(), 'ok', `✅ 配置已保存，已加载 ${d.providers} 个 AI 提供商（立即生效，端口/地址变更需重启）`);
+    showToast(toast(), 'ok', `✅ 配置已保存，新闻分析 ${d.newsProviders} 个模型，每日分析 ${d.dailyProviders} 个模型（立即生效，端口/地址变更需重启）`);
   } catch (e) {
     showToast(toast(), 'err', '保存失败：' + e.message);
   } finally {

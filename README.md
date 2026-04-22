@@ -45,8 +45,12 @@ npm install
 
 ```json
 {
-  "AI_PROVIDERS": [
+  "NEWS_ANALYSIS_AI_PROVIDERS": [
     { "type": "minimax", "apiKey": "你的API密钥", "model": "MiniMax-M2.5" },
+    { "type": "openai",  "apiKey": "你的API密钥", "model": "gpt-4o" },
+    { "type": "gemini",  "apiKey": "你的API密钥", "model": "gemini-2.0-flash" }
+  ],
+  "DAILY_ANALYSIS_AI_PROVIDERS": [
     { "type": "openai",  "apiKey": "你的API密钥", "model": "gpt-4o" },
     { "type": "gemini",  "apiKey": "你的API密钥", "model": "gemini-2.0-flash" },
     { "type": "claude",  "apiKey": "你的API密钥", "model": "claude-sonnet-4-20250514" }
@@ -56,9 +60,9 @@ npm install
 }
 ```
 
-只需配置你实际使用的 AI 提供商即可。系统会按数组顺序依次尝试，第一个成功返回的结果即被采用。
+`NEWS_ANALYSIS_AI_PROVIDERS` 用于单条新闻分析，`DAILY_ANALYSIS_AI_PROVIDERS` 用于每日综合分析。两组都会按数组顺序依次尝试，第一个成功返回的结果即被采用。
 
-> 向后兼容：仍支持直接配置 `MINIMAX_API_KEY` 字段。
+> 向后兼容：仍支持旧版 `AI_PROVIDERS` 与 `MINIMAX_API_KEY` 字段；服务下次启动读取配置时，会自动迁移本地 `config.json` 到新格式。
 
 配置也可通过 Web 管理页面在线修改（访问 `/config.html`）。
 

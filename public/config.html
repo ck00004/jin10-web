@@ -14,13 +14,32 @@
   </header>
 
   <div class="config-container">
-    <!-- AI Providers -->
+    <!-- News Analysis Providers -->
     <div class="section">
-      <div class="section-title">🤖 AI 提供商配置</div>
-      <div id="providers-list"></div>
-      <button class="add-provider-btn" onclick="addProvider()">＋ 添加 AI 提供商</button>
+      <div class="section-title">📰 单条新闻分析模型</div>
+      <div id="news-providers-list"></div>
+      <button class="add-provider-btn" onclick="addNewsProvider()">＋ 添加新闻分析模型</button>
 
       <div class="type-hints">
+        <strong>用途：</strong> 用于红色重要新闻的实时分析，以及“重新分析单条新闻”接口。<br><br>
+        <strong>类型说明：</strong><br>
+        <strong>openai</strong> — OpenAI 官方或任何 OpenAI 兼容 API（本地 Ollama、One API、各类代理均可）<br>
+        <strong>claude</strong> — Anthropic Claude 官方或兼容接口<br>
+        <strong>gemini</strong> — Google Gemini 官方接口<br>
+        <strong>minimax</strong> — MiniMax 官方接口（Anthropic 兼容）<br><br>
+        <strong>远程地址（baseUrl）：</strong> 填写 API 的根路径（不含最后的斜杠），留空使用各提供商默认地址。<br>
+        例如：<code>https://api.openai.com/v1</code>、<code>http://localhost:11434/v1</code>（Ollama）、<code>https://your-proxy.example.com/v1</code>
+      </div>
+    </div>
+
+    <!-- Daily Analysis Providers -->
+    <div class="section">
+      <div class="section-title">📅 每日分析模型</div>
+      <div id="daily-providers-list"></div>
+      <button class="add-provider-btn" onclick="addDailyProvider()">＋ 添加每日分析模型</button>
+
+      <div class="type-hints">
+        <strong>用途：</strong> 用于每日汇总报告生成，不影响单条新闻分析。<br><br>
         <strong>类型说明：</strong><br>
         <strong>openai</strong> — OpenAI 官方或任何 OpenAI 兼容 API（本地 Ollama、One API、各类代理均可）<br>
         <strong>claude</strong> — Anthropic Claude 官方或兼容接口<br>
