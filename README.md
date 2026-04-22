@@ -100,7 +100,11 @@ pkill -f "monitor.mjs"
 |------|------|------|
 | `/api/health` | GET | 健康检查 |
 | `/api/status` | GET | 监控状态（连接状态、错误信息等） |
+<<<<<<< HEAD
 | `/api/news` | GET | 获取新闻列表（支持 `limit`、`before`、`includeSkipped`、`includeDeleted`、`importantOnly`、`date`、`startTime`、`endTime`、`includeAnalysis` 参数） |
+=======
+| `/api/news` | GET | 获取新闻列表（支持 `limit`、`before`、`includeSkipped` 参数） |
+>>>>>>> 48d53d6a6935e3c7147355d946d872b05a94a93a
 | `/api/news/reanalyze` | POST | 重新分析单条新闻（参数：`id`） |
 | `/api/config` | GET | 获取当前配置 |
 | `/api/config` | POST | 更新配置 |
