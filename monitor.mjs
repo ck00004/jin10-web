@@ -2,7 +2,7 @@
 /**
  * 金十红色新闻监控 - 入口文件
  */
-import { getAiProviders } from './lib/config.mjs';
+import { getNewsAiProviders } from './lib/config.mjs';
 import { log, logErr, acquireLock } from './lib/utils.mjs';
 import { loadDedup, saveDedup, cleanDedup, getKey, loadState } from './lib/dedup.mjs';
 import { isAd, isClickToView, isCalendarPreview } from './lib/filters.mjs';
@@ -110,7 +110,7 @@ async function processFlashEvent(event, dedupRef, state) {
   let analysisText = '';
   let analysisSource = '';
   let analysisError = '';
-  const AI_PROVIDERS = getAiProviders();
+  const AI_PROVIDERS = getNewsAiProviders();
   if (AI_PROVIDERS.length > 0) {
     try {
       const res = await analyze(item, state);

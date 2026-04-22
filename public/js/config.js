@@ -192,8 +192,7 @@ window.saveConfig = async function () {
     } else {
       delete body.WEB_HOST;
     }
-    body.AI_DEBUG = aiDebug || undefined;
-    if (!body.AI_DEBUG) delete body.AI_DEBUG;
+    body.AI_DEBUG = aiDebug;
 
     // Remove legacy MINIMAX_API_KEY if AI_PROVIDERS handles it
     // (keep it if user hasn't migrated yet)

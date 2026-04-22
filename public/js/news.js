@@ -73,7 +73,7 @@ async function loadNews(reset = false) {
 
   try {
     const before = reset ? 0 : (oldestCreatedAt || 0);
-    const url = `/api/news?limit=${PAGE_SIZE}${skippedParam()}` + (before > 0 ? `&before=${before}` : '');
+    const url = `/api/news?limit=${PAGE_SIZE}&includeAnalysis=1${skippedParam()}` + (before > 0 ? `&before=${before}` : '');
     const res = await fetch(url);
     const data = await res.json();
 
@@ -104,7 +104,7 @@ window.refresh = async function () {
   const btn = $('refresh-btn');
   btn.disabled = true;
   try {
-    const res = await fetch(`/api/news?limit=${PAGE_SIZE}${skippedParam()}`);
+    const res = await fetch(`/api/news?limit=${PAGE_SIZE}&includeAnalysis=1${skippedParam()}`);
     const data = await res.json();
     if (!data.ok) throw new Error('API error');
 
