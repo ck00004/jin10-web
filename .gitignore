@@ -15,3 +15,8 @@ errors.log
 
 # dependencies
 node_modules/
+
+# 数据库
+news.sqlite3
+news.sqlite3-shm
+news.sqlite3-wal
