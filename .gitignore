@@ -6,6 +6,7 @@ config.json
 state.json
 dedup.json
 news.json
+news.json.bak
 
 # logs
 *.log
