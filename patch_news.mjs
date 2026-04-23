@@ -1,0 +1,275 @@
+import fs from 'fs';
+
+const file = 'lib/news.mjs';
+const code = fs.readFileSync(file, 'utf-8');
+
+const splitIndex = code.indexOf('// ── 每日分析');
+if (splitIndex === -1) throw new Error('Split marker not found');
+
+const bottom = code.slice(splitIndex);
+
+let newTop = `/**
+ * 新闻存储与每日报告模块
+ */
+import { readFileSync, existsSync, renameSync } from 'fs';
+import Database from 'better-sqlite3';
+import { DAILY_FILE, DB_FILE, NEWS_FILE } from './config.mjs';
+import { getDailyAnalysisAiProviders } from './config.mjs';
+import { sleep, log, logErr } from './utils.mjs';
+
+// ── 数据库初始化与迁移 ──────────────────────────────────────────
+
+const db = new Database(DB_FILE);
+db.pragma('journal_mode = WAL');
+
+db.exec(\`
+  CREATE TABLE IF NOT EXISTS news (
+    id TEXT PRIMARY KEY,
+    flashId TEXT,
+    createdAt INTEGER,
+    important INTEGER,
+    skipped INTEGER,
+    deleted INTEGER,
+    raw_json TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_news_createdAt ON news(createdAt DESC);
+  CREATE INDEX IF NOT EXISTS idx_news_flashId ON news(flashId);
+\`);
+
+if (existsSync(NEWS_FILE)) {
+  try {
+    const backupFile = NEWS_FILE + '.bak';
+    log(\`检测到旧版 JSON 数据文件，开始迁移到 SQLite: \${NEWS_FILE}\`);
+    const data = JSON.parse(readFileSync(NEWS_FILE, 'utf-8'));
+    const items = data.items || [];
+    
+    const insertStmt = db.prepare(\`
+      INSERT OR IGNORE INTO news (id, flashId, createdAt, important, skipped, deleted, raw_json)
+      VALUES (@id, @flashId, @createdAt, @important, @skipped, @deleted, @raw_json)
+    \`);
+    
+    const insertMany = db.transaction((newsItems) => {
+      for (const entry of newsItems) {
+        insertStmt.run({
+          id: entry.id || String(Date.now() + Math.random()),
+          flashId: entry.flashId || '',
+          createdAt: Number(entry.createdAt || 0),
+          important: entry.important ? 1 : 0,
+          skipped: entry.skipped ? 1 : 0,
+          deleted: entry.deleted ? 1 : 0,
+          raw_json: JSON.stringify(entry)
+        });
+      }
+    });
+    
+    insertMany(items);
+    renameSync(NEWS_FILE, backupFile);
+    log(\`迁移完成！旧文件已备份为: \${backupFile}\`);
+  } catch (e) {
+    logErr(\`数据自动迁移失败: \${e.message}\`);
+  }
+}
+
+// ── 辅助函数 ───────────────────────────────────────────────────────
+
+function getDateStr(timestampMs) {
+  const d = new Date(timestampMs);
+  const z = String(d.getTimezoneOffset() / -60);
+  const localD = new Date(d.getTime() + (8 - Number(z)) * 3600 * 1000);
+  const yyyy = localD.getFullYear();
+  const mm = String(localD.getMonth() + 1).padStart(2, '0');
+  const dd = String(localD.getDate()).padStart(2, '0');
+  return \\\`\\\${yyyy}-\\\${mm}-\\\${dd}\\\`;
+}
+
+function normalizeDateInput(value) {
+  const text = String(value || '').trim();
+  return /^\\d{4}-\\d{2}-\\d{2}$/.test(text) ? text : '';
+}
+
+function normalizeTimeInput(value) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  if (/^\\d{2}:\\d{2}$/.test(text)) return \\\`\\\${text}:00\\\`;
+  return /^\\d{2}:\\d{2}:\\d{2}$/.test(text) ? text : '';
+}
+
+function toShanghaiEpochMs(dateStr, timeStr) {
+  const normalizedDate = normalizeDateInput(dateStr);
+  const normalizedTime = normalizeTimeInput(timeStr || '00:00:00');
+  if (!normalizedDate || !normalizedTime) return null;
+  const parsed = Date.parse(\\\`\\\${normalizedDate}T\\\${normalizedTime}+08:00\\\`);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+// ── 新闻存储 ───────────────────────────────────────────────────────
+
+export function loadNews() {
+  const rows = db.prepare('SELECT raw_json FROM news ORDER BY createdAt DESC').all();
+  return rows.map(r => JSON.parse(r.raw_json));
+}
+
+export function queryNewsItems(options = {}) {
+  const {
+    limit = 20,
+    before = 0,
+    includeSkipped = false,
+    includeDeleted = false,
+    importantOnly = false,
+    date = '',
+    startTime = '',
+    endTime = '',
+  } = options;
+
+  let whereClauses = [];
+  let params = {};
+
+  if (!includeSkipped) whereClauses.push('skipped = 0');
+  if (!includeDeleted) whereClauses.push('deleted = 0');
+  if (importantOnly) whereClauses.push('important = 1');
+
+  const normalizedDate = normalizeDateInput(date);
+  const normalizedStartTime = normalizeTimeInput(startTime);
+  const normalizedEndTime = normalizeTimeInput(endTime);
+
+  if (normalizedDate) {
+    const startMs = toShanghaiEpochMs(normalizedDate, normalizedStartTime || '00:00:00');
+    const endMs = toShanghaiEpochMs(normalizedDate, normalizedEndTime || '23:59:59');
+    if (startMs !== null) {
+      whereClauses.push('createdAt >= @startMs');
+      params.startMs = startMs;
+    }
+    if (endMs !== null) {
+      whereClauses.push('createdAt <= @endMs');
+      params.endMs = endMs;
+    }
+  }
+
+  const whereSql = whereClauses.length > 0 ? \\\`WHERE \\\${whereClauses.join(' AND ')}\\\` : '';
+  const totalRow = db.prepare(\\\`SELECT COUNT(*) as count FROM news \\\${whereSql}\\\`).get(params);
+  const total = totalRow.count;
+
+  if (Number(before || 0) > 0) {
+    whereClauses.push('createdAt < @before');
+    params.before = Number(before);
+  }
+
+  const poolWhereSql = whereClauses.length > 0 ? \\\`WHERE \\\${whereClauses.join(' AND ')}\\\` : '';
+  const poolCountRow = db.prepare(\\\`SELECT COUNT(*) as count FROM news \\\${poolWhereSql}\\\`).get(params);
+  
+  const safeLimit = Math.min(Math.max(parseInt(String(limit || '20'), 10) || 20, 1), 200);
+
+  const rows = db.prepare(\\\`
+    SELECT raw_json FROM news
+    \\\${poolWhereSql}
+    ORDER BY createdAt DESC
+    LIMIT @limit
+  \\\`).all({ ...params, limit: safeLimit });
+
+  let page = rows.map(r => JSON.parse(r.raw_json));
+  
+  if (normalizedDate) {
+    page = page.filter(item => getDateStr(item.createdAt) === normalizedDate);
+  }
+
+  return {
+    items: page,
+    total,
+    hasMore: poolCountRow.count > safeLimit,
+  };
+}
+
+export function appendNews(entry) {
+  db.prepare(\\\`
+    INSERT INTO news (id, flashId, createdAt, important, skipped, deleted, raw_json)
+    VALUES (@id, @flashId, @createdAt, @important, @skipped, @deleted, @raw_json)
+  \\\`).run({
+    id: entry.id,
+    flashId: entry.flashId,
+    createdAt: Number(entry.createdAt || 0),
+    important: entry.important ? 1 : 0,
+    skipped: entry.skipped ? 1 : 0,
+    deleted: entry.deleted ? 1 : 0,
+    raw_json: JSON.stringify(entry)
+  });
+}
+
+export function updateNewsItem(id, updates) {
+  const row = db.prepare('SELECT raw_json FROM news WHERE id = ?').get(id);
+  if (!row) return false;
+  const oldItem = JSON.parse(row.raw_json);
+  const nextItem = { ...oldItem, ...updates };
+
+  db.prepare(\\\`
+    UPDATE news SET
+      important = @important,
+      skipped = @skipped,
+      deleted = @deleted,
+      raw_json = @raw_json
+    WHERE id = @id
+  \\\`).run({
+    id,
+    important: nextItem.important ? 1 : 0,
+    skipped: nextItem.skipped ? 1 : 0,
+    deleted: nextItem.deleted ? 1 : 0,
+    raw_json: JSON.stringify(nextItem)
+  });
+  return true;
+}
+
+export function updateNewsByFlashId(flashId, newContent, extraUpdates) {
+  const row = db.prepare('SELECT raw_json FROM news WHERE flashId = ? ORDER BY createdAt DESC LIMIT 1').get(flashId);
+  if (!row) return false;
+  const old = JSON.parse(row.raw_json);
+  const historyEntry = {
+    at: Date.now(),
+    oldContent: old.content || '',
+    newContent: newContent || '',
+  };
+  const editHistory = Array.isArray(old.editHistory) ? [...old.editHistory, historyEntry] : [historyEntry];
+  const nextItem = { ...old, content: newContent || old.content, editHistory, ...(extraUpdates || {}) };
+  
+  db.prepare(\\\`
+    UPDATE news SET
+      important = @important,
+      skipped = @skipped,
+      deleted = @deleted,
+      raw_json = @raw_json
+    WHERE flashId = @flashId
+  \\\`).run({
+    flashId,
+    important: nextItem.important ? 1 : 0,
+    skipped: nextItem.skipped ? 1 : 0,
+    deleted: nextItem.deleted ? 1 : 0,
+    raw_json: JSON.stringify(nextItem)
+  });
+  return true;
+}
+
+export function markDeletedByFlashId(flashId) {
+  const row = db.prepare('SELECT raw_json FROM news WHERE flashId = ? ORDER BY createdAt DESC LIMIT 1').get(flashId);
+  if (!row) return false;
+  const old = JSON.parse(row.raw_json);
+  const nextItem = { ...old, deleted: true, deletedAt: Date.now() };
+  
+  db.prepare(\\\`
+    UPDATE news SET
+      deleted = 1,
+      raw_json = @raw_json
+    WHERE flashId = @flashId
+  \\\`).run({
+    flashId,
+    raw_json: JSON.stringify(nextItem)
+  });
+  return true;
+}
+\`;
+
+let oldGetDay = 'return loadNews().filter(item => getDateStr(item.createdAt) === dateStr);';
+let newGetDay = \`const startMs = toShanghaiEpochMs(dateStr, '00:00:00');
+  const endMs = toShanghaiEpochMs(dateStr, '23:59:59');
+  if (startMs === null || endMs === null) return [];
+  const rows = db.prepare(\\\`SELECT raw_json FROM news WHERE createdAt >= ? AND createdAt <= ? ORDER BY createdAt DESC\\\`).all(startMs, endMs);
+  return rows.map(r => JSON.parse(r.raw_json));\`;
+
+fs.writeFileSync(file, newTop + bottom.replace(oldGetDay, newGetDay));
