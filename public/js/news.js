@@ -482,7 +482,78 @@ function buildClsCard(item) {
     card.appendChild(metaRow);
   }
 
+  if (item.analysis) {
+    card.appendChild(buildAiBlock(item.analysis, item.analysisSource, item.technical));
+  } else if (item.analysisError) {
+    const noAi = document.createElement('div');
+    noAi.className = 'ai-block';
+    noAi.innerHTML = `<div class="ai-no-analysis">🤖 AI 分析暂不可用：${esc(item.analysisError)}</div>`;
+    card.appendChild(noAi);
+  }
+
+  if (isImportant) {
+    const actions = document.createElement('div');
+    actions.className = 'card-actions';
+    const aiBtn = document.createElement('button');
+    aiBtn.className = 'btn btn-secondary btn-sm';
+    aiBtn.textContent = item.analysis ? '🔄 重新AI分析' : '🤖 AI分析';
+    aiBtn.onclick = () => reanalyzeCls(item.id);
+    actions.appendChild(aiBtn);
+    card.appendChild(actions);
+  }
+
   return card;
+}
+
+async function reanalyzeCls(id) {
+  const card = document.querySelector(`.news-card[data-id="${CSS.escape(id)}"]`);
+  const btn = card?.querySelector('.card-actions .btn');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '分析中…';
+  }
+  try {
+    const res = await fetch('/api/cls/reanalyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    });
+    const d = await res.json();
+    if (!d.ok) throw new Error(d.error || '分析失败');
+
+    if (card) {
+      const oldBlock = card.querySelector('.ai-block');
+      if (oldBlock) oldBlock.remove();
+      const actions = card.querySelector('.card-actions');
+      if (d.analysis) {
+        const newBlock = buildAiBlock(d.analysis, d.analysisSource, d.technical);
+        card.insertBefore(newBlock, actions);
+      } else if (d.analysisError) {
+        const noAi = document.createElement('div');
+        noAi.className = 'ai-block';
+        noAi.innerHTML = `<div class="ai-no-analysis">🤖 AI 分析暂不可用：${esc(d.analysisError)}</div>`;
+        card.insertBefore(noAi, actions);
+      }
+    }
+
+    const index = allItems.findIndex(item => String(item?.id || '') === String(id));
+    if (index !== -1) {
+      allItems[index] = {
+        ...allItems[index],
+        analysis: d.analysis || '',
+        analysisSource: d.analysisSource || '',
+        analysisError: d.analysisError || '',
+        technical: d.technical || '',
+      };
+    }
+  } catch (e) {
+    alert(`CLS 重新AI分析失败: ${e.message}`);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '🔄 重新AI分析';
+    }
+  }
 }
 
 // ── Edit History Block ───────────────────────────────────────────────────────
