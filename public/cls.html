@@ -3,35 +3,32 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>金十重要新闻 · AI 分析</title>
+  <title>CLS 电报 · AI 分析</title>
   <link rel="stylesheet" href="/css/theme.css" />
   <link rel="stylesheet" href="/css/news.css" />
+  <link rel="stylesheet" href="/css/cls.css" />
 </head>
-<body>
+<body data-source="cls">
   <header class="app-header">
-    <h1>📡 金十重要新闻 · AI 分析</h1>
+    <h1>⚡ CLS 电报 · AI 分析</h1>
     <div class="status-bar" id="status-bar">
       <span class="status-dot" id="status-dot"></span>
       <span id="status-text">加载中…</span>
-      <a class="btn btn-secondary" href="/cls.html">⚡ CLS 电报</a>
+      <a class="btn btn-secondary" href="/">📰 金十新闻</a>
       <button class="btn btn-secondary" onclick="toggleDailyPanel()">📅 每日分析</button>
-      <label class="toggle-wrap" id="skipped-toggle" onclick="toggleSkipped()">
-        <span class="toggle-switch"></span>
-        <span>显示跳过</span>
-      </label>
       <label class="toggle-wrap" id="important-toggle" onclick="toggleImportantOnly()">
         <span class="toggle-switch"></span>
         <span>仅看重要</span>
       </label>
       <a class="btn btn-secondary" href="/config.html">⚙️ 配置</a>
-      <button class="refresh-btn" id="refresh-btn" onclick="refresh()">🔄 刷新</button>
+      <button class="btn btn-secondary" id="consume-btn" onclick="consumeNewItems()">已读新增</button>
+      <button class="refresh-btn" id="refresh-btn" onclick="refresh()">🔄 同步一次</button>
     </div>
   </header>
 
-  <!-- Daily Analysis Panel (Calendar) -->
   <div class="daily-panel" id="daily-panel">
     <div class="daily-panel-inner">
-      <h2>📅 每日新闻综合分析</h2>
+      <h2>📅 每日电报综合分析</h2>
       <div class="calendar-nav">
         <button class="btn btn-secondary" onclick="calendarPrev()">◀ 上月</button>
         <span class="calendar-month-label" id="calendar-month-label"></span>
@@ -51,8 +48,27 @@
     </div>
   </div>
 
-  <div class="news-grid" id="news-grid">
-    <div class="loading-placeholder">📡 正在加载新闻…</div>
+  <div class="cls-summary-bar">
+    <div class="cls-summary-card">
+      <span class="cls-summary-label">监控状态</span>
+      <strong id="cls-summary-status">加载中…</strong>
+    </div>
+    <div class="cls-summary-card">
+      <span class="cls-summary-label">最近新增</span>
+      <strong id="cls-summary-new">0</strong>
+    </div>
+    <div class="cls-summary-card">
+      <span class="cls-summary-label">最近修正</span>
+      <strong id="cls-summary-refresh">0</strong>
+    </div>
+    <div class="cls-summary-card">
+      <span class="cls-summary-label">运行窗口</span>
+      <strong id="cls-summary-window">—</strong>
+    </div>
+  </div>
+
+  <div class="news-grid cls-grid" id="news-grid">
+    <div class="loading-placeholder">⚡ 正在加载电报…</div>
   </div>
 
   <div class="load-more-wrap" id="load-more-wrap" style="display:none">

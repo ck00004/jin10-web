@@ -7,6 +7,7 @@
 - 实时监控金十财经全部快讯（普通快讯 + 红色重要快讯 + 日历事件）
 - 红色重要新闻自动触发 AI 分析（标的、方向、逻辑链、核心驱动、关键风险、确认信号、技术面）
 - 内置 Web 服务器，提供新闻展示页面和在线配置管理页面
+- 新增 CLS 默认电报页镜像监控，包含初始化首屏、增量 update、refresh 修正与 recovery 标记
 - 支持快讯的新增、修改、删除实时同步
 - 自动过滤广告、"点击查看"占位内容、日历预告类内容
 - 自动去重（72 小时内）
@@ -66,6 +67,13 @@ npm install
 
 配置也可通过 Web 管理页面在线修改（访问 `/config.html`）。
 
+新增 CLS 电报页面访问地址：`/cls.html`
+
+CLS 页面现已与 Jin10 主页面保持同构布局：
+- 共用同一套配置页
+- 共用同一套每日分析接口
+- 通过 `source=news|cls` 区分分析数据源
+
 ## 使用
 
 ```bash
@@ -83,6 +91,10 @@ pkill -f "monitor.mjs"
 ```
 
 启动后自动开启 Web 服务器，默认访问地址：`http://localhost:3000`
+
+同一进程内会并行启动两套监控：
+- Jin10 WebSocket 快讯监控
+- CLS 默认电报页轮询监控
 
 ## AI 分析格式
 
@@ -106,11 +118,17 @@ pkill -f "monitor.mjs"
 | `/api/status` | GET | 监控状态（连接状态、错误信息等） |
 | `/api/news` | GET | 获取新闻列表（支持 `limit`、`before`、`includeSkipped`、`includeDeleted`、`importantOnly`、`date`、`startTime`、`endTime`、`includeAnalysis` 参数） |
 | `/api/news/reanalyze` | POST | 重新分析单条新闻（参数：`id`） |
+| `/api/cls/status` | GET | 获取 CLS 电报监控状态 |
+| `/api/cls/telegraphs` | GET | 获取 CLS 电报列表（支持 `limit`、`beforeCtime`、`beforeId`、`startCtime`、`endCtime`、`importantOnly`、`onlyRecovered`、`minLevel`、`subject`、`tag`、`stock`、`keyword`、`source=temp`） |
+| `/api/cls/telegraphs/:id` | GET | 获取单条 CLS 电报详情，附带 firstSeenAt / lastSeenAt / updatedAt 等持久化元信息 |
+| `/api/cls/export` | GET | 批量导出 CLS 电报，默认返回 JSON，支持 `format=jsonl` 以及与列表相同的过滤、时间范围和游标参数 |
+| `/api/cls/sync` | POST | 手动触发 CLS update/refresh（参数：`mode=update|refresh|both`） |
+| `/api/cls/consume` | POST | 清空 CLS 未读新增计数与最近新增批次 |
 | `/api/config` | GET | 获取当前配置 |
 | `/api/config` | POST | 更新配置 |
-| `/api/daily-analysis/dates` | GET | 获取已有每日分析的日期列表 |
-| `/api/daily-analysis` | GET | 获取指定日期的每日分析（参数：`date`） |
-| `/api/daily-analysis/trigger` | POST | 手动触发生成每日分析报告 |
+| `/api/daily-analysis/dates` | GET | 获取已有每日分析的日期列表（参数：`source=news|cls`，默认 `news`） |
+| `/api/daily-analysis` | GET | 获取指定日期的每日分析（参数：`date`、`source=news|cls`，默认 `news`） |
+| `/api/daily-analysis/trigger` | POST | 手动触发生成每日分析报告（参数：`date`、`source=news|cls`，默认 `news`） |
 
 ## 文件说明
 
@@ -121,12 +139,15 @@ pkill -f "monitor.mjs"
 | `lib/websocket.mjs` | 金十 WebSocket 协议与连接模块 |
 | `lib/ai.mjs` | AI 提供商调用与分析模块 |
 | `lib/news.mjs` | 新闻存储与每日分析模块 |
+| `lib/cls-telegraph.mjs` | CLS 默认电报页状态机、轮询与存储模块 |
 | `lib/dedup.mjs` | 去重与状态管理模块 |
 | `lib/filters.mjs` | 广告/占位/预告内容过滤模块 |
 | `lib/server.mjs` | HTTP/API 服务器模块 |
 | `lib/flashlog.mjs` | 快讯日志记录模块 |
 | `lib/utils.mjs` | 工具函数（日志、进程锁等） |
 | `public/index.html` | 新闻展示前端页面 |
+| `public/cls.html` | CLS 电报页面，沿用 Jin10 主页面结构与每日分析面板 |
+| `public/js/news.js` | Jin10 / CLS 共用页面脚本，按 source 切换数据源 |
 | `public/config.html` | 在线配置管理页面 |
 | `config.json` | 配置文件（不提交到 git） |
 | `news.json` | 新闻数据存储 |

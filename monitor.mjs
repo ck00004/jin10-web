@@ -8,6 +8,7 @@ import { loadDedup, saveDedup, cleanDedup, getKey, loadState } from './lib/dedup
 import { isAd, isClickToView, isCalendarPreview } from './lib/filters.mjs';
 import { analyze, buildTechnicalSummary } from './lib/ai.mjs';
 import { appendNews, updateNewsByFlashId, markDeletedByFlashId, loadDailyAnalyses, saveDailyAnalysis, getTodayDateStr, generateDailyReport } from './lib/news.mjs';
+import { startClsTelegraphMonitor } from './lib/cls-telegraph.mjs';
 import { connectJin10WebSocket } from './lib/websocket.mjs';
 import { startWebServer } from './lib/server.mjs';
 import { logFlashNew, logFlashEdit, logFlashDelete } from './lib/flashlog.mjs';
@@ -174,6 +175,7 @@ async function main() {
   acquireLock();
   log('🔴 金十监控启动 (WebSocket 模式)');
   startWebServer();
+  startClsTelegraphMonitor();
 
   dedup = loadDedup();
   const state = loadState();

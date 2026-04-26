@@ -4,20 +4,48 @@
 import { esc, fmtTime } from './utils.js';
 
 // ── State ────────────────────────────────────────────────────────────────────
+const SOURCE = document.body.dataset.source === 'cls' ? 'cls' : 'news';
+const IS_CLS = SOURCE === 'cls';
 let allItems = [];
 let oldestCreatedAt = 0;
+let oldestId = 0;
 let hasMore = false;
 let autoRefreshTimer = null;
 let showSkipped = false;
 let importantOnly = false;
-const PAGE_SIZE = 20;
+const PAGE_SIZE = IS_CLS ? 30 : 20;
 
 // ── DOM references ───────────────────────────────────────────────────────────
 const $ = (id) => document.getElementById(id);
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function skippedParam() {
+  if (IS_CLS) return '';
   return showSkipped ? '&includeSkipped=1' : '';
+}
+
+function importantParam() {
+  return importantOnly ? '&importantOnly=1' : '';
+}
+
+function getItemKey(item) {
+  return String(item?.id || '');
+}
+
+function buildListUrl(reset = false) {
+  if (IS_CLS) {
+    const params = new URLSearchParams();
+    params.set('limit', String(PAGE_SIZE));
+    if (importantOnly) params.set('importantOnly', '1');
+    if (!reset && oldestCreatedAt > 0) {
+      params.set('beforeCtime', String(oldestCreatedAt));
+      params.set('beforeId', String(oldestId || 0));
+    }
+    return `/api/cls/telegraphs?${params.toString()}`;
+  }
+
+  const before = reset ? 0 : (oldestCreatedAt || 0);
+  return `/api/news?limit=${PAGE_SIZE}&includeAnalysis=1${skippedParam()}${importantParam()}` + (before > 0 ? `&before=${before}` : '');
 }
 
 function setStatus(state, text) {
@@ -27,6 +55,7 @@ function setStatus(state, text) {
 
 // ── Toggle handlers ──────────────────────────────────────────────────────────
 window.toggleSkipped = function () {
+  if (IS_CLS) return;
   showSkipped = !showSkipped;
   $('skipped-toggle').classList.toggle('active', showSkipped);
   loadNews(true);
@@ -35,7 +64,7 @@ window.toggleSkipped = function () {
 window.toggleImportantOnly = function () {
   importantOnly = !importantOnly;
   $('important-toggle').classList.toggle('active', importantOnly);
-  reRenderAll();
+  loadNews(true);
 };
 
 function reRenderAll() {
@@ -43,7 +72,7 @@ function reRenderAll() {
   const grid = $('news-grid');
   grid.innerHTML = '';
   if (filtered.length === 0) {
-    grid.innerHTML = '<div class="loading-placeholder">📭 暂无匹配的新闻数据</div>';
+    grid.innerHTML = `<div class="loading-placeholder">${IS_CLS ? '📭 暂无匹配的电报数据' : '📭 暂无匹配的新闻数据'}</div>`;
   } else {
     const fragment = document.createDocumentFragment();
     for (const item of filtered) {
@@ -63,7 +92,18 @@ async function init() {
 
 function scheduleAutoRefresh() {
   if (autoRefreshTimer) clearInterval(autoRefreshTimer);
-  autoRefreshTimer = setInterval(refresh, 30_000);
+  autoRefreshTimer = setInterval(() => {
+    if (IS_CLS) {
+      void pollClsPage();
+      return;
+    }
+    void refresh();
+  }, 30_000);
+}
+
+async function pollClsPage() {
+  await loadNews(true);
+  await updateStatusBar();
 }
 
 // ── Fetch news ───────────────────────────────────────────────────────────────
@@ -72,27 +112,29 @@ async function loadNews(reset = false) {
   btn.disabled = true;
 
   try {
-    const before = reset ? 0 : (oldestCreatedAt || 0);
-    const url = `/api/news?limit=${PAGE_SIZE}&includeAnalysis=1${skippedParam()}` + (before > 0 ? `&before=${before}` : '');
+    const url = buildListUrl(reset);
     const res = await fetch(url);
     const data = await res.json();
 
     if (!data.ok) throw new Error('API error');
 
+    const items = Array.isArray(data.items) ? data.items : [];
     if (reset) {
-      allItems = data.items;
+      allItems = items;
     } else {
-      allItems = allItems.concat(data.items);
+      allItems = allItems.concat(items);
     }
 
     if (allItems.length > 0) {
-      oldestCreatedAt = allItems[allItems.length - 1].createdAt;
+      const lastItem = allItems[allItems.length - 1];
+      oldestCreatedAt = Number(IS_CLS ? lastItem.ctime : lastItem.createdAt) || 0;
+      oldestId = Number(lastItem.id || 0);
     }
     hasMore = data.hasMore;
 
-    renderCards(data.items, !reset);
+    renderCards(items, !reset);
     $('load-more-wrap').style.display = hasMore ? 'block' : 'none';
-    setStatus('ok', `共 ${data.total} 条 · ${fmtTime(new Date())}`);
+    setStatus('ok', `共 ${data.total} 条${IS_CLS ? '电报' : ''} · ${fmtTime(new Date())}`);
   } catch (e) {
     setStatus('err', `加载失败: ${e.message}`);
   } finally {
@@ -104,12 +146,23 @@ window.refresh = async function () {
   const btn = $('refresh-btn');
   btn.disabled = true;
   try {
-    const res = await fetch(`/api/news?limit=${PAGE_SIZE}&includeAnalysis=1${skippedParam()}`);
+    if (IS_CLS) {
+      const syncRes = await fetch('/api/cls/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'both' }),
+      });
+      const syncData = await syncRes.json();
+      if (!syncData.ok) throw new Error(syncData.error || 'sync failed');
+    }
+
+    const res = await fetch(buildListUrl(true));
     const data = await res.json();
     if (!data.ok) throw new Error('API error');
 
-    const existingIds = new Set(allItems.map(n => n.id));
-    const newItems = data.items.filter(n => !existingIds.has(n.id));
+    const existingIds = new Set(allItems.map(getItemKey));
+    const latestItems = Array.isArray(data.items) ? data.items : [];
+    const newItems = latestItems.filter(n => !existingIds.has(getItemKey(n)));
 
     if (newItems.length > 0) {
       allItems = newItems.concat(allItems);
@@ -118,7 +171,10 @@ window.refresh = async function () {
 
     hasMore = data.hasMore;
     $('load-more-wrap').style.display = hasMore ? 'block' : 'none';
-    setStatus('ok', `共 ${data.total} 条 · ${fmtTime(new Date())}`);
+    setStatus('ok', `共 ${data.total} 条${IS_CLS ? '电报' : ''} · ${fmtTime(new Date())}`);
+    if (IS_CLS) {
+      await updateStatusBar();
+    }
   } catch (e) {
     setStatus('err', `刷新失败: ${e.message}`);
   } finally {
@@ -150,7 +206,7 @@ function renderCards(items, append = false, prepend = false) {
   if (!append && !prepend) {
     grid.innerHTML = '';
     if (filtered.length === 0) {
-      grid.innerHTML = '<div class="loading-placeholder">📭 暂无新闻数据</div>';
+      grid.innerHTML = `<div class="loading-placeholder">${IS_CLS ? '📭 暂无电报数据' : '📭 暂无新闻数据'}</div>`;
       return;
     }
   }
@@ -171,6 +227,12 @@ function renderCards(items, append = false, prepend = false) {
 
 // ── Card Builder ─────────────────────────────────────────────────────────────
 function buildCard(item) {
+  if (IS_CLS) return buildClsCard(item);
+
+  return buildNewsCard(item);
+}
+
+function buildNewsCard(item) {
   const card = document.createElement('div');
   const isImportant = item.important === true;
   const isDeleted = item.deleted === true;
@@ -348,6 +410,81 @@ function buildCard(item) {
   return card;
 }
 
+function buildClsCard(item) {
+  const card = document.createElement('div');
+  const isImportant = item.important === true;
+  const isRecovered = item.recovery === true;
+  let cls = 'card news-card cls-card';
+  if (isImportant) cls += ' important';
+  if (isRecovered) cls += ' recovered';
+  card.className = cls;
+  card.dataset.id = item.id;
+
+  const timeEl = document.createElement('div');
+  timeEl.className = 'card-time';
+  let timeHtml = esc(new Date(Number(item.ctime || 0) * 1000).toLocaleString('zh-CN', { hour12: false }));
+  timeHtml += `<span class="flash-id">ID: ${esc(item.id)}</span>`;
+  if (item.level) timeHtml += `<span class="badge badge-default">Level ${esc(item.level)}</span>`;
+  if (isImportant) timeHtml += '<span class="badge badge-important">重要</span>';
+  if (isRecovered) timeHtml += '<span class="badge badge-skip">Recovery</span>';
+  if (Number(item.recommend || 0) === 1) timeHtml += '<span class="badge badge-hot">Recommend</span>';
+  if (Number(item.jpush || 0) === 1) timeHtml += '<span class="badge badge-vip">JPush</span>';
+  timeEl.innerHTML = timeHtml;
+  card.appendChild(timeEl);
+
+  if (item.title) {
+    const titleEl = document.createElement('div');
+    titleEl.className = 'card-title';
+    titleEl.textContent = item.title;
+    card.appendChild(titleEl);
+  }
+
+  const contentEl = document.createElement('div');
+  contentEl.className = 'card-content';
+  contentEl.textContent = item.content || '';
+  card.appendChild(contentEl);
+
+  if (item.shareurl) {
+    const linkEl = document.createElement('div');
+    linkEl.className = 'card-link';
+    linkEl.innerHTML = `<a href="${esc(item.shareurl)}" target="_blank" rel="noreferrer">${esc(item.shareurl)}</a>`;
+    card.appendChild(linkEl);
+  }
+
+  const subjects = Array.isArray(item.subjects) ? item.subjects : [];
+  const tags = Array.isArray(item.tags) ? item.tags : [];
+  const stocks = Array.isArray(item.stock_list) ? item.stock_list : [];
+  if (subjects.length > 0 || tags.length > 0 || stocks.length > 0) {
+    const metaRow = document.createElement('div');
+    metaRow.className = 'meta-row';
+
+    for (const subject of subjects) {
+      const chip = document.createElement('span');
+      chip.className = 'meta-chip subject';
+      chip.textContent = subject.subject_name || '';
+      metaRow.appendChild(chip);
+    }
+    for (const tag of tags) {
+      const chip = document.createElement('span');
+      chip.className = 'meta-chip tag';
+      chip.textContent = typeof tag === 'string' ? tag : (tag?.name || tag?.tag_name || tag?.title || '');
+      metaRow.appendChild(chip);
+    }
+    for (const stock of stocks) {
+      const chip = document.createElement('span');
+      chip.className = 'meta-chip stock';
+      const code = stock?.StockID || stock?.stock_id || stock?.secu_code || '';
+      const name = stock?.name || stock?.secu_name || '';
+      chip.textContent = name && code ? `${name} (${code})` : (name || code);
+      metaRow.appendChild(chip);
+    }
+
+    card.appendChild(metaRow);
+  }
+
+  return card;
+}
+
 // ── Edit History Block ───────────────────────────────────────────────────────
 function buildEditHistoryBlock(editHistory) {
   const block = document.createElement('div');
@@ -514,6 +651,29 @@ function detectDirection(dirText) {
 
 // ── Status Bar ───────────────────────────────────────────────────────────────
 async function updateStatusBar() {
+  if (IS_CLS) {
+    try {
+      const res = await fetch('/api/cls/status');
+      const d = await res.json();
+      if (d.ok) {
+        const monitor = d.monitor || {};
+        updateClsSummary(monitor);
+        if (monitor.status === 'running') {
+          setStatus('ok', `运行中 · update ${fmtTime(monitor.lastUpdateAt ? new Date(monitor.lastUpdateAt) : new Date())}`);
+        } else if (monitor.status === 'degraded') {
+          setStatus('warn', `降级运行 · ${monitor.lastError || '最近一次轮询失败'}`);
+        } else if (monitor.status === 'error') {
+          setStatus('err', monitor.lastError || '初始化失败');
+        } else {
+          setStatus('', '初始化中…');
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+    return;
+  }
+
   try {
     const res = await fetch('/api/status');
     const d = await res.json();
@@ -526,6 +686,7 @@ async function updateStatusBar() {
 
 // ── Re-analyze ───────────────────────────────────────────────────────────────
 async function reanalyzeNews(id) {
+  if (IS_CLS) return;
   const card = document.querySelector(`.news-card[data-id="${CSS.escape(id)}"]`);
   const btn = card?.querySelector('.card-actions .btn');
   if (btn) {
@@ -579,6 +740,37 @@ window.addEventListener('scroll', () => {
   if (btn) btn.classList.toggle('visible', window.scrollY > 400);
 }, { passive: true });
 
+function updateClsSummary(monitor) {
+  const statusEl = $('cls-summary-status');
+  const newEl = $('cls-summary-new');
+  const refreshEl = $('cls-summary-refresh');
+  const windowEl = $('cls-summary-window');
+  if (!statusEl || !newEl || !refreshEl || !windowEl) return;
+
+  statusEl.textContent = monitor?.status || 'idle';
+  newEl.textContent = String(monitor?.newNumber || 0);
+  refreshEl.textContent = String(monitor?.lastRefreshTouchedCount || 0);
+  const range = monitor?.lastRefreshRange;
+  if (range?.startCtime && range?.endCtime) {
+    windowEl.textContent = `${new Date(range.startCtime * 1000).toLocaleTimeString('zh-CN', { hour12: false })} - ${new Date(range.endCtime * 1000).toLocaleTimeString('zh-CN', { hour12: false })}`;
+  } else {
+    windowEl.textContent = '—';
+  }
+}
+
+window.consumeNewItems = async function () {
+  if (!IS_CLS) return;
+  const btn = $('consume-btn');
+  if (!btn) return;
+  btn.disabled = true;
+  try {
+    await fetch('/api/cls/consume', { method: 'POST' });
+    await updateStatusBar();
+  } finally {
+    btn.disabled = false;
+  }
+};
+
 // ── Daily Analysis (Calendar) ────────────────────────────────────────────────
 let dailyPanelVisible = false;
 let calendarYear = new Date().getFullYear();
@@ -597,7 +789,7 @@ window.toggleDailyPanel = function () {
 
 async function loadCalendarDates() {
   try {
-    const res = await fetch('/api/daily-analysis/dates');
+    const res = await fetch(`/api/daily-analysis/dates?source=${encodeURIComponent(SOURCE)}`);
     const d = await res.json();
     if (d.ok) {
       calendarDatesWithAnalysis = new Set(d.dates);
@@ -691,7 +883,7 @@ async function loadDailyForDate(dateStr) {
   rows.innerHTML = '';
   empty.style.display = 'none';
   try {
-    const res = await fetch(`/api/daily-analysis?date=${encodeURIComponent(dateStr)}`);
+    const res = await fetch(`/api/daily-analysis?date=${encodeURIComponent(dateStr)}&source=${encodeURIComponent(SOURCE)}`);
     const d = await res.json();
     if (!d.ok) throw new Error('API error');
     const entry = d.analysis;
@@ -701,7 +893,9 @@ async function loadDailyForDate(dateStr) {
       return;
     }
     const genAt = new Date(entry.generatedAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
-    meta.textContent = `日期：${d.date} · 共 ${entry.newsCount} 条新闻 · 生成于 ${genAt} · 来源：${entry.source || '—'}`;
+    const itemCount = entry.itemCount || entry.newsCount || 0;
+    const itemLabel = entry.itemLabel || (IS_CLS ? '电报' : '新闻');
+    meta.textContent = `日期：${d.date} · 共 ${itemCount} 条${itemLabel} · 生成于 ${genAt} · 数据源：${entry.dataSourceLabel || (IS_CLS ? 'CLS 电报' : '金十新闻')} · AI：${entry.source || '—'}`;
     rows.innerHTML = '';
     const DAILY_FIELDS = [
       ['市场概述', '市场概述'],
@@ -768,7 +962,7 @@ window.triggerDailyAnalysis = async function () {
     const res = await fetch('/api/daily-analysis/trigger', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ date }),
+      body: JSON.stringify({ date, source: SOURCE }),
     });
     const d = await res.json();
     $('daily-meta').textContent = d.message || '已触发，请稍后刷新';

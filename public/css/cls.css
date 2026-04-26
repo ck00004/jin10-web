@@ -1,0 +1,134 @@
+.status-dot.ok {
+  background: var(--bull);
+  box-shadow: 0 0 8px var(--bull);
+}
+
+.status-dot.warn {
+  background: var(--warning);
+  box-shadow: 0 0 8px var(--warning);
+}
+
+.status-dot.err {
+  background: var(--bear);
+  box-shadow: 0 0 8px var(--bear);
+}
+
+.refresh-btn {
+  padding: 7px 18px;
+  background: linear-gradient(135deg, #0ea5e9, #2563eb);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 700;
+  font-family: inherit;
+  transition: all 0.2s ease;
+}
+
+.refresh-btn:hover {
+  transform: translateY(-1px);
+}
+
+.refresh-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+  transform: none;
+}
+
+.cls-summary-bar {
+  max-width: 1680px;
+  margin: 18px auto 0;
+  padding: 0 20px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.cls-summary-card {
+  border: 1px solid rgba(37, 99, 235, 0.22);
+  border-radius: 16px;
+  padding: 14px 16px;
+  background: linear-gradient(135deg, rgba(12, 18, 31, 0.96), rgba(18, 28, 48, 0.94));
+  box-shadow: var(--shadow-card);
+}
+
+.cls-summary-label {
+  display: block;
+  font-size: 0.76rem;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.cls-summary-card strong {
+  font-size: 1rem;
+  color: #e2e8f0;
+}
+
+.cls-grid {
+  margin-top: 10px;
+}
+
+.cls-card {
+  background: linear-gradient(180deg, rgba(21, 24, 35, 0.94), rgba(14, 18, 27, 0.94));
+}
+
+.cls-card.recovered {
+  border-left: 3px solid var(--warning);
+  box-shadow: inset 0 0 0 1px rgba(251, 191, 36, 0.12);
+}
+
+.meta-row {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.meta-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.12);
+  color: var(--text-secondary);
+  font-size: 0.74rem;
+}
+
+.meta-chip.subject {
+  background: rgba(14, 165, 233, 0.12);
+  color: #7dd3fc;
+}
+
+.meta-chip.tag {
+  background: rgba(59, 130, 246, 0.12);
+  color: #93c5fd;
+}
+
+.meta-chip.stock {
+  background: rgba(251, 191, 36, 0.12);
+  color: #fde68a;
+}
+
+.card-link a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.card-link a:hover {
+  text-decoration: underline;
+}
+
+@media (max-width: 1024px) {
+  .cls-summary-bar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 680px) {
+  .cls-summary-bar {
+    grid-template-columns: 1fr;
+    padding: 0 12px;
+  }
+}
