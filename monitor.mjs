@@ -168,6 +168,18 @@ export function createProcessFlashEvent(overrides = {}) {
 
 export const processFlashEvent = createProcessFlashEvent();
 
+export function shouldAutoStartMonitor({
+  argv = process.argv,
+  env = process.env,
+  modulePath = fileURLToPath(import.meta.url),
+} = {}) {
+  const scriptArg = argv?.[1] ? resolve(argv[1]) : '';
+  const pmExecPath = env?.pm_exec_path ? resolve(env.pm_exec_path) : '';
+  const isDirectRun = !!scriptArg && scriptArg === modulePath;
+  const isPm2Run = !!pmExecPath && pmExecPath === modulePath;
+  return isDirectRun || isPm2Run;
+}
+
 // 每日分析定时检查（每 10 分钟检查一次）
 function startDailyAnalysisTimer() {
   setInterval(async () => {
@@ -217,8 +229,6 @@ async function main() {
   });
 }
 
-const isDirectRun = !!process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
-
-if (isDirectRun) {
+if (shouldAutoStartMonitor()) {
   main().catch(e => { logErr(`crash: ${e.message}`); process.exit(1); });
 }

@@ -1,7 +1,31 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createProcessFlashEvent } from '../monitor.mjs';
+import { createProcessFlashEvent, shouldAutoStartMonitor } from '../monitor.mjs';
+
+test('pm2 启动时应判定为自动运行 monitor 主程序', () => {
+  assert.equal(
+    shouldAutoStartMonitor({
+      argv: ['/opt/homebrew/bin/node', '/tmp/pm2/ProcessContainerFork.js'],
+      env: {
+        pm_exec_path: '/Users/ck0004/工具开发/AIcode/gupiao/jin10-web-master/monitor.mjs',
+      },
+      modulePath: '/Users/ck0004/工具开发/AIcode/gupiao/jin10-web-master/monitor.mjs',
+    }),
+    true,
+  );
+});
+
+test('仅被测试导入时不应自动运行 monitor 主程序', () => {
+  assert.equal(
+    shouldAutoStartMonitor({
+      argv: ['/opt/homebrew/bin/node', '/Users/ck0004/工具开发/AIcode/gupiao/jin10-web-master/tests/monitor-duplicate-websocket.test.mjs'],
+      env: {},
+      modulePath: '/Users/ck0004/工具开发/AIcode/gupiao/jin10-web-master/monitor.mjs',
+    }),
+    false,
+  );
+});
 
 test('重复 WebSocket 重要消息并发到达时不会重复入库或抛错', async () => {
   const appendCalls = [];
