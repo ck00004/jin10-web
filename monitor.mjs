@@ -2,6 +2,8 @@
 /**
  * 金十红色新闻监控 - 入口文件
  */
+import { resolve } from 'path';
+import { fileURLToPath } from 'url';
 import { getNewsAiProviders } from './lib/config.mjs';
 import { log, logErr, acquireLock } from './lib/utils.mjs';
 import { loadDedup, saveDedup, cleanDedup, getKey, loadState } from './lib/dedup.mjs';
@@ -22,122 +24,149 @@ let dedup = {};
  *   action=2: 修改 (flashId + content 有值)
  *   action=3: 删除 (flashId 有值)
  */
-async function processFlashEvent(event, dedupRef, state) {
-  const { action } = event;
+export function createProcessFlashEvent(overrides = {}) {
+  const deps = {
+    getNewsAiProviders,
+    log,
+    saveDedup,
+    getKey,
+    isAd,
+    isClickToView,
+    isCalendarPreview,
+    analyze,
+    buildTechnicalSummary,
+    appendNews,
+    updateNewsByFlashId,
+    markDeletedByFlashId,
+    logFlashNew,
+    logFlashEdit,
+    logFlashDelete,
+    ...overrides,
+  };
 
-  // ── action=2 修改 ──────────────────────────────────────────────────
-  if (action === 2) {
-    const { flashId, content } = event;
-    logFlashEdit(flashId, content);
-    if (flashId) {
-      updateNewsByFlashId(flashId, content);
+  return async function processFlashEvent(event, dedupRef, state) {
+    const { action } = event;
+
+    // ── action=2 修改 ──────────────────────────────────────────────────
+    if (action === 2) {
+      const { flashId, content } = event;
+      deps.logFlashEdit(flashId, content);
+      if (flashId) {
+        deps.updateNewsByFlashId(flashId, content);
+      }
+      return;
     }
-    return;
-  }
 
-  // ── action=3 删除 ──────────────────────────────────────────────────
-  if (action === 3) {
-    const { flashId } = event;
-    logFlashDelete(flashId);
-    if (flashId) {
-      markDeletedByFlashId(flashId);
+    // ── action=3 删除 ──────────────────────────────────────────────────
+    if (action === 3) {
+      const { flashId } = event;
+      deps.logFlashDelete(flashId);
+      if (flashId) {
+        deps.markDeletedByFlashId(flashId);
+      }
+      return;
     }
-    return;
-  }
 
-  // ── action=1 新增 ──────────────────────────────────────────────────
-  const { item } = event;
-  const k = getKey(item);
+    // ── action=1 新增 ──────────────────────────────────────────────────
+    const { item } = event;
+    const k = deps.getKey(item);
 
-  // 去重：已处理过则跳过
-  if (dedupRef[k]) return;
+    // 去重：已处理过则跳过
+    if (dedupRef[k]) return;
 
-  // 写入快讯日志（所有快讯都记录）
-  logFlashNew(item);
+    // 先占位，避免 AI 分析或其他异步处理期间同一条消息重复进入。
+    dedupRef[k] = { ts: Date.now(), pending: true };
+    deps.saveDedup(dedupRef);
 
-  // 非红色新闻：直接存储，不做 AI 分析，不做过滤
-  if (!item.important) {
+    // 写入快讯日志（所有快讯都记录）
+    deps.logFlashNew(item);
+
+    // 非红色新闻：直接存储，不做 AI 分析，不做过滤
+    if (!item.important) {
+      dedupRef[k] = { ts: Date.now() };
+      deps.saveDedup(dedupRef);
+      deps.appendNews({
+        id: k, flashId: item.flashId, time: item.time, title: item.title, content: item.content,
+        important: false, tags: item.tags, hotTag: item.hotTag, remarks: item.remarks,
+        affect: item.affect, source: item.source, calendarData: item.calendarData,
+        vipTitle: item.vipTitle, vipDesc: item.vipDesc, link: item.link,
+        createdAt: Date.now(),
+      });
+      return;
+    }
+
+    // ── 以下仅针对红色（重要）新闻 ──────────────────────────────────
+
+    // 广告过滤
+    if (deps.isAd(item)) {
+      deps.log(`  🚫 广告过滤: ${item.title?.substring(0,30)}`);
+      dedupRef[k] = { ts: Date.now(), ad: true };
+      deps.saveDedup(dedupRef);
+      deps.appendNews({ id: k, flashId: item.flashId, time: item.time, title: item.title, content: item.content,
+        important: true, skipped: true, skipReason: '广告',
+        tags: item.tags, hotTag: item.hotTag, remarks: item.remarks, affect: item.affect, source: item.source,
+        createdAt: Date.now() });
+      return;
+    }
+
+    // 过滤「点击查看」占位内容
+    if (deps.isClickToView(item)) {
+      deps.log(`  🚫 点击查看过滤: ${item.time} ${item.title?.substring(0,30)}`);
+      dedupRef[k] = { ts: Date.now(), click_to_view: true };
+      deps.saveDedup(dedupRef);
+      deps.appendNews({ id: k, flashId: item.flashId, time: item.time, title: item.title, content: item.content,
+        important: true, skipped: true, skipReason: '点击查看',
+        tags: item.tags, hotTag: item.hotTag, remarks: item.remarks, affect: item.affect, source: item.source,
+        createdAt: Date.now() });
+      return;
+    }
+
+    // 过滤「周度/日历/预告」类内容
+    if (deps.isCalendarPreview(item)) {
+      deps.log(`  🚫 日历/预告过滤: ${item.time} ${item.title?.substring(0, 30)}`);
+      dedupRef[k] = { ts: Date.now(), calendar_preview: true };
+      deps.saveDedup(dedupRef);
+      deps.appendNews({ id: k, flashId: item.flashId, time: item.time, title: item.title, content: item.content,
+        important: true, skipped: true, skipReason: '日历/预告',
+        tags: item.tags, hotTag: item.hotTag, remarks: item.remarks, affect: item.affect, source: item.source,
+        createdAt: Date.now() });
+      return;
+    }
+
+    // 生成 AI 分析（仅红色新闻）
+    let analysisText = '';
+    let analysisSource = '';
+    let analysisError = '';
+    const AI_PROVIDERS = deps.getNewsAiProviders();
+    if (AI_PROVIDERS.length > 0) {
+      try {
+        const res = await deps.analyze(item, state);
+        analysisText = res?.text || '';
+        analysisSource = res?.source || '';
+        if (!analysisText) analysisError = '暂不可用';
+      } catch (e) {
+        analysisError = e?.message ? String(e.message).slice(0, 120) : '暂不可用';
+      }
+    }
+
+    const technical = await deps.buildTechnicalSummary(analysisText);
+    state.lastPushAt = Date.now();
+
     dedupRef[k] = { ts: Date.now() };
-    saveDedup(dedupRef);
-    appendNews({
-      id: k, flashId: item.flashId, time: item.time, title: item.title, content: item.content,
-      important: false, tags: item.tags, hotTag: item.hotTag, remarks: item.remarks,
+    deps.saveDedup(dedupRef);
+
+    deps.appendNews({ id: k, flashId: item.flashId, time: item.time, title: item.title, content: item.content,
+      important: true, analysis: analysisText, analysisSource, analysisError, technical,
+      tags: item.tags, hotTag: item.hotTag, remarks: item.remarks,
       affect: item.affect, source: item.source, calendarData: item.calendarData,
       vipTitle: item.vipTitle, vipDesc: item.vipDesc, link: item.link,
-      createdAt: Date.now(),
-    });
-    return;
-  }
-
-  // ── 以下仅针对红色（重要）新闻 ──────────────────────────────────
-
-  // 广告过滤
-  if (isAd(item)) {
-    log(`  🚫 广告过滤: ${item.title?.substring(0,30)}`);
-    dedupRef[k] = { ts: Date.now(), ad: true };
-    saveDedup(dedupRef);
-    appendNews({ id: k, flashId: item.flashId, time: item.time, title: item.title, content: item.content,
-      important: true, skipped: true, skipReason: '广告',
-      tags: item.tags, hotTag: item.hotTag, remarks: item.remarks, affect: item.affect, source: item.source,
       createdAt: Date.now() });
-    return;
-  }
 
-  // 过滤「点击查看」占位内容
-  if (isClickToView(item)) {
-    log(`  🚫 点击查看过滤: ${item.time} ${item.title?.substring(0,30)}`);
-    dedupRef[k] = { ts: Date.now(), click_to_view: true };
-    saveDedup(dedupRef);
-    appendNews({ id: k, flashId: item.flashId, time: item.time, title: item.title, content: item.content,
-      important: true, skipped: true, skipReason: '点击查看',
-      tags: item.tags, hotTag: item.hotTag, remarks: item.remarks, affect: item.affect, source: item.source,
-      createdAt: Date.now() });
-    return;
-  }
-
-  // 过滤「周度/日历/预告」类内容
-  if (isCalendarPreview(item)) {
-    log(`  🚫 日历/预告过滤: ${item.time} ${item.title?.substring(0, 30)}`);
-    dedupRef[k] = { ts: Date.now(), calendar_preview: true };
-    saveDedup(dedupRef);
-    appendNews({ id: k, flashId: item.flashId, time: item.time, title: item.title, content: item.content,
-      important: true, skipped: true, skipReason: '日历/预告',
-      tags: item.tags, hotTag: item.hotTag, remarks: item.remarks, affect: item.affect, source: item.source,
-      createdAt: Date.now() });
-    return;
-  }
-
-  // 生成 AI 分析（仅红色新闻）
-  let analysisText = '';
-  let analysisSource = '';
-  let analysisError = '';
-  const AI_PROVIDERS = getNewsAiProviders();
-  if (AI_PROVIDERS.length > 0) {
-    try {
-      const res = await analyze(item, state);
-      analysisText = res?.text || '';
-      analysisSource = res?.source || '';
-      if (!analysisText) analysisError = '暂不可用';
-    } catch (e) {
-      analysisError = e?.message ? String(e.message).slice(0, 120) : '暂不可用';
-    }
-  }
-
-  const technical = await buildTechnicalSummary(analysisText);
-  state.lastPushAt = Date.now();
-
-  dedupRef[k] = { ts: Date.now() };
-  saveDedup(dedupRef);
-
-  appendNews({ id: k, flashId: item.flashId, time: item.time, title: item.title, content: item.content,
-    important: true, analysis: analysisText, analysisSource, analysisError, technical,
-    tags: item.tags, hotTag: item.hotTag, remarks: item.remarks,
-    affect: item.affect, source: item.source, calendarData: item.calendarData,
-    vipTitle: item.vipTitle, vipDesc: item.vipDesc, link: item.link,
-    createdAt: Date.now() });
-
-  log(`  ✅ 已处理: ${item.time} (ID: ${item.flashId}) ${item.title?.substring(0,30) || item.content?.substring(0,30)}`);
+    deps.log(`  ✅ 已处理: ${item.time} (ID: ${item.flashId}) ${item.title?.substring(0,30) || item.content?.substring(0,30)}`);
+  };
 }
+
+export const processFlashEvent = createProcessFlashEvent();
 
 // 每日分析定时检查（每 10 分钟检查一次）
 function startDailyAnalysisTimer() {
@@ -188,4 +217,8 @@ async function main() {
   });
 }
 
-main().catch(e => { logErr(`crash: ${e.message}`); process.exit(1); });
+const isDirectRun = !!process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+
+if (isDirectRun) {
+  main().catch(e => { logErr(`crash: ${e.message}`); process.exit(1); });
+}
