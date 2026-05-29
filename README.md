@@ -130,6 +130,8 @@ pkill -f "monitor.mjs"
 | `/api/daily-analysis` | GET | 获取指定日期的每日分析（参数：`date`、`source=news|cls`，默认 `news`） |
 | `/api/daily-analysis/trigger` | POST | 手动触发生成每日分析报告（参数：`date`、`source=news|cls`，默认 `news`） |
 
+> CLS 电报监控当前跟随财联社默认电报页，使用 `/api/cache?name=refreshTenTelegraph` 作为上游数据源。旧版 CLS 电报接口已下线，不再使用。
+
 ## 文件说明
 
 | 文件/目录 | 说明 |
@@ -139,7 +141,7 @@ pkill -f "monitor.mjs"
 | `lib/websocket.mjs` | 金十 WebSocket 协议与连接模块 |
 | `lib/ai.mjs` | AI 提供商调用与分析模块 |
 | `lib/news.mjs` | 新闻存储与每日分析模块 |
-| `lib/cls-telegraph.mjs` | CLS 默认电报页状态机、轮询与存储模块 |
+| `lib/cls-telegraph.mjs` | CLS 默认电报页状态机、轮询与存储模块，当前按网页逻辑读取 `refreshTenTelegraph` 缓存接口 |
 | `lib/dedup.mjs` | 去重与状态管理模块 |
 | `lib/filters.mjs` | 广告/占位/预告内容过滤模块 |
 | `lib/server.mjs` | HTTP/API 服务器模块 |
